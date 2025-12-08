@@ -1,0 +1,2 @@
+"""Tempo-Team scraper module."""
+

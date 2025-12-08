@@ -1,0 +1,79 @@
+[project]
+name = "staffing-agency-scraper"
+version = "0.1.0"
+description = "Scraping pipeline for Dutch staffing agencies (inhuren.nl)"
+requires-python = ">=3.10"
+dependencies = [
+  "dagster>=1.10.2",
+  "dagster-cloud>=1.10.2",
+  "dagster-webserver>=1.10.2",
+  "psycopg>=3.2.5",
+  "psycopg-binary>=3.2.5",
+  "psycopg-pool>=3.2.5",
+  "pytest>=8.3.4",
+  "requests[socks]>=2.23.3",
+  "fake-useragent>=2.0.3",
+  "beautifulsoup4>=4.13.3",
+  "lxml>=5.3.0",
+  "html5lib>=1.1",
+  # Always make sure to lock down the version!
+  # And match it with Dockerfile.dagster-base as well!
+  "playwright==1.54.0",
+  "pydantic>=2.10.0",
+  "aiohttp>=3.12.12",
+  "aiodns>=3.4.0",
+  "truststore>=0.10.1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff>=0.3.0",
+  "pyright>=1.1.344",
+  "responses>=0.25.6",
+  "types-requests>=2.32.4.20250611",
+  "types-beautifulsoup4>=4.12.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+exclude = [".git", ".venv", "__pycache__", "build", "dist", ".claude"]
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I", "W", "C4", "UP", "N", "SIM", "PT", "RUF"]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["."]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.pyright]
+include = ["."]
+exclude = ["**/__pycache__", "**/.venv", "**/venv"]
+reportMissingImports = true
+reportMissingTypeStubs = false
+pythonVersion = "3.10"
+pythonPlatform = "Darwin"
+typeCheckingMode = "basic"
+
+[tool.dagster]
+module_name = "staffing_agency_scraper.definitions"
+
+[tool.pytest.ini_options]
+testpaths = [".", "staffing_agency_scraper"]
+
+[dependency-groups]
+dev = ["responses>=0.25.6"]
+

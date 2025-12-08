@@ -1,0 +1,2 @@
+"""Randstad scraper module."""
+

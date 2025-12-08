@@ -1,0 +1,133 @@
+// Prisma schema for staffing agency scraper database
+// This schema stores scraped agency data for inhuren.nl
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("PIPELINE_PG_CONNSTRING")
+}
+
+// Main staffing agency table
+model staffing_agency {
+  id                    String   @id @default(uuid())
+  agency_name           String
+  legal_name            String?
+  logo_url              String?
+  website_url           String   @unique
+  brand_group           String?
+  hq_city               String?
+  hq_province           String?
+  kvk_number            String?
+  
+  // Contact information (business-only)
+  contact_phone         String?
+  contact_email         String?
+  contact_form_url      String?
+  employers_page_url    String?
+  
+  // Geographic coverage
+  regions_served        String[]
+  geo_focus_type        String   @default("national")
+  
+  // Market positioning
+  sectors_core          String[]
+  sectors_secondary     String[]
+  role_levels           String[]
+  company_size_fit      String[]
+  customer_segments     String[]
+  
+  // Specialisations
+  focus_segments        String[]
+  shift_types_supported String[]
+  volume_specialisation String   @default("unknown")
+  typical_use_cases     String[]
+  
+  // Services (stored as JSON)
+  services              Json     @default("{}")
+  
+  // Legal / CAO & compliance
+  cao_type              String   @default("onbekend")
+  phase_system          Json?
+  certifications        String[]
+  membership            String[]
+  
+  // Pricing (optional)
+  pricing_model         String   @default("unknown")
+  pricing_transparency  String?
+  omrekenfactor_min     Float?
+  omrekenfactor_max     Float?
+  example_pricing_hint  String?
+  takeover_policy       Json?
+  
+  // Digital capabilities (stored as JSON)
+  digital_capabilities  Json     @default("{}")
+  ai_capabilities       Json     @default("{}")
+  
+  // Review signals
+  review_rating         Float?
+  review_count          Int?
+  review_sources        String[]
+  
+  // Provenance
+  evidence_urls         String[]
+  notes                 String?
+  
+  // Timestamps
+  collected_at          DateTime @default(now())
+  created_at            DateTime @default(now())
+  updated_at            DateTime @updatedAt
+  
+  // Relations
+  office_locations      office_location[]
+  scrape_logs           scrape_log[]
+  
+  @@index([agency_name])
+  @@index([collected_at])
+}
+
+// Office locations for agencies
+model office_location {
+  id        String          @id @default(uuid())
+  agency_id String
+  city      String
+  province  String?
+  address   String?
+  
+  agency    staffing_agency @relation(fields: [agency_id], references: [id], onDelete: Cascade)
+  
+  @@index([agency_id])
+}
+
+// Scrape log for tracking scraping history
+model scrape_log {
+  id               String          @id @default(uuid())
+  agency_id        String
+  started_at       DateTime        @default(now())
+  completed_at     DateTime?
+  status           String          @default("running") // running, success, failed
+  pages_scraped    Int             @default(0)
+  error_message    String?
+  urls_visited     String[]
+  
+  agency           staffing_agency @relation(fields: [agency_id], references: [id], onDelete: Cascade)
+  
+  @@index([agency_id])
+  @@index([started_at])
+}
+
+// Raw scraped data landing table (before normalization)
+model scraped_page {
+  id           String   @id @default(uuid())
+  url          String
+  html_content String?
+  scraped_at   DateTime @default(now())
+  status_code  Int?
+  error        String?
+  
+  @@index([url])
+  @@index([scraped_at])
+}
+

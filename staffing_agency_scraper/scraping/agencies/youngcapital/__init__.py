@@ -1,0 +1,2 @@
+"""YoungCapital scraper module."""
+
