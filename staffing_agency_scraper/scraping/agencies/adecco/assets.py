@@ -29,16 +29,15 @@ class AdeccoScraper(BaseAgencyScraper):
     BRAND_GROUP = "Adecco Group"
 
     # Adecco uses /nl-nl/ path prefix for Dutch content
+    # URLs discovered from sitemap analysis
     PAGES_TO_SCRAPE = [
         "https://www.adecco.nl",
         "https://www.adecco.nl/nl-nl/werkgevers",
         "https://www.adecco.nl/nl-nl/over-adecco",
-        "https://www.adecco.nl/nl-nl/contact",
-        "https://www.adecco.nl/nl-nl/werkgevers/diensten",
-        "https://www.adecco.nl/nl-nl/werkgevers/sectoren",
-        "https://www.adecco.nl/nl-nl/policy/privacy-policy",
-        "https://www.adecco.nl/nl-nl/policy/terms-of-use",
         "https://www.adecco.nl/nl-nl/over-adecco/de-adecco-group",
+        "https://www.adecco.nl/nl-nl/contact",
+        "https://www.adecco.nl/nl-nl/policy/privacy-policy",
+        "https://www.adecco-jobs.com/amazon/en-nl/contact/",  # Has phone & email
     ]
 
     def scrape(self) -> Agency:
@@ -61,9 +60,12 @@ class AdeccoScraper(BaseAgencyScraper):
                 if url == self.WEBSITE_URL and not agency.logo_url:
                     agency.logo_url = self._extract_logo(soup)
 
-                # Extract phone from contact page
-                if "contact" in url.lower() and not agency.contact_phone:
-                    agency.contact_phone = self._extract_phone(soup, page_text)
+                # Extract phone and email from contact pages
+                if "contact" in url.lower():
+                    if not agency.contact_phone:
+                        agency.contact_phone = self._extract_phone(soup, page_text)
+                    if not agency.contact_email:
+                        agency.contact_email = self._extract_email(soup, page_text)
 
                 # Extract KvK from legal pages
                 if any(p in url.lower() for p in ["privacy", "terms", "policy"]):
@@ -118,24 +120,38 @@ class AdeccoScraper(BaseAgencyScraper):
         return None
 
     def _extract_phone(self, soup: BeautifulSoup, text: str) -> str | None:
-        """Extract phone number from Adecco's contact page."""
-        # Look for Dutch phone patterns
+        """Extract phone number - simple regex based."""
+        # Dutch phone patterns
         patterns = [
-            r"(?:tel|telefoon|bel)[:\s]*(\+31[\s\-\.]?\d{1,3}[\s\-\.]?\d{3}[\s\-\.]?\d{4})",
-            r"(?:tel|telefoon|bel)[:\s]*(0\d{2,3}[\s\-\.]?\d{3}[\s\-\.]?\d{3,4})",
-            r"(\+31[\s\-]?\d{1,3}[\s\-]?\d{3}[\s\-]?\d{4})",
-            r"(0\d{3}[\s\-\.]?\d{3}[\s\-\.]?\d{3})",
+            r"(0\d{2}\s?\d{3,4}\s?\d{3,4})",  # 065 3940431
+            r"(\+31\s?\d{1,3}\s?\d{3}\s?\d{4})",  # +31 format
         ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                phone = match.group(1).strip()
+                self.logger.info(f"Found phone: {phone}")
+                return phone
+        
+        return None
 
+    def _extract_email(self, soup: BeautifulSoup, text: str) -> str | None:
+        """Extract email - simple regex based."""
+        # Look for adecco emails
+        patterns = [
+            r"([\w\.\-]+@adecco\.nl)",
+            r"([\w\.\-]+@adecco\.com)",
+            r"([\w\.\-]+@adecco[\w\-]*\.[\w]+)",
+        ]
+        
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
-                phone = match.group(1).strip()
-                # Clean up phone number
-                phone = re.sub(r"[^\d\+\s\-]", "", phone)
-                self.logger.info(f"Found phone: {phone}")
-                return phone
-
+                email = match.group(1)
+                self.logger.info(f"Found email: {email}")
+                return email
+        
         return None
 
     def _extract_kvk(self, text: str) -> str | None:
