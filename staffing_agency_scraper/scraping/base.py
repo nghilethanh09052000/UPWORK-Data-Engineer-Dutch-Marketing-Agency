@@ -12,9 +12,18 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urljoin
 
 import dagster as dg
 
+from staffing_agency_scraper.lib.extract import (
+    extract_contact_from_page,
+    extract_from_footer,
+    extract_kvk_from_text,
+    extract_dutch_phone,
+    extract_business_email,
+    extract_structured_data,
+)
 from staffing_agency_scraper.lib.fetch import fetch_with_retry
 from staffing_agency_scraper.lib.normalize import (
     detect_cao_type,
@@ -94,7 +103,12 @@ class BaseAgencyScraper(ABC):
 
     def extract_contact_info(self, soup: BeautifulSoup) -> dict:
         """
-        Extract contact information from a page.
+        Extract contact information from a page using enhanced extraction.
+
+        Uses multiple methods:
+        - JSON-LD structured data
+        - Footer extraction
+        - Full page text scanning
 
         Parameters
         ----------
@@ -104,19 +118,19 @@ class BaseAgencyScraper(ABC):
         Returns
         -------
         dict
-            Contact information
+            Contact information including kvk_number, contact_phone, contact_email
         """
-        page_text = soup.get_text()
-
-        return {
-            "contact_phone": extract_phone(page_text),
-            "contact_email": extract_email(page_text),
-            "kvk_number": extract_kvk_number(page_text),
-        }
+        # Use enhanced extraction that checks multiple sources
+        return extract_contact_from_page(soup)
 
     def extract_logo_url(self, soup: BeautifulSoup) -> str | None:
         """
         Extract logo URL from page.
+
+        Checks multiple sources:
+        - JSON-LD structured data
+        - OG meta tags
+        - Common logo selectors
 
         Parameters
         ----------
@@ -128,6 +142,18 @@ class BaseAgencyScraper(ABC):
         str | None
             Logo URL or None
         """
+        # First try structured data
+        structured = extract_structured_data(soup)
+        if structured.get("logo_url"):
+            return structured["logo_url"]
+        
+        # Try OG image
+        og_image = soup.find("meta", attrs={"property": "og:image"})
+        if og_image and og_image.get("content"):
+            content = og_image.get("content")
+            if "logo" in str(content).lower():
+                return content
+        
         # Common logo selectors
         logo_selectors = [
             "img.logo",
@@ -135,6 +161,10 @@ class BaseAgencyScraper(ABC):
             ".logo img",
             "header img",
             "[class*='logo'] img",
+            "a.logo img",
+            ".header-logo img",
+            ".site-logo img",
+            "#logo img",
         ]
 
         for selector in logo_selectors:
@@ -146,7 +176,6 @@ class BaseAgencyScraper(ABC):
                     if src.startswith("//"):
                         return f"https:{src}"
                     elif src.startswith("/"):
-                        from urllib.parse import urljoin
                         return urljoin(self.WEBSITE_URL, src)
                     return src
         return None
@@ -270,4 +299,91 @@ class BaseAgencyScraper(ABC):
             evidence_urls=self.evidence_urls.copy(),
             collected_at=self.collected_at,
         )
+
+    def scrape_all_pages(self, agency: Agency) -> Agency:
+        """
+        Scrape all configured pages and merge data into agency.
+        
+        This is a helper method that iterates through PAGES_TO_SCRAPE
+        and extracts all available information.
+        
+        Parameters
+        ----------
+        agency : Agency
+            Agency object to update
+        
+        Returns
+        -------
+        Agency
+            Updated agency object
+        """
+        all_certifications = set()
+        all_sectors = set()
+        all_services = {}
+        
+        for url in self.PAGES_TO_SCRAPE:
+            try:
+                soup = self.fetch_page(url)
+                
+                # Extract contact info from every page (might be in footer)
+                contact = self.extract_contact_info(soup)
+                
+                # Update agency with found data (don't overwrite existing)
+                if contact.get("kvk_number") and not agency.kvk_number:
+                    agency.kvk_number = contact["kvk_number"]
+                    self.logger.info(f"Found KvK: {agency.kvk_number}")
+                
+                if contact.get("contact_phone") and not agency.contact_phone:
+                    agency.contact_phone = contact["contact_phone"]
+                    self.logger.info(f"Found phone: {agency.contact_phone}")
+                
+                if contact.get("contact_email") and not agency.contact_email:
+                    agency.contact_email = contact["contact_email"]
+                    self.logger.info(f"Found email: {agency.contact_email}")
+                
+                if contact.get("hq_city") and not agency.hq_city:
+                    agency.hq_city = contact["hq_city"]
+                
+                if contact.get("hq_province") and not agency.hq_province:
+                    agency.hq_province = contact["hq_province"]
+                
+                # Extract logo from homepage
+                if not agency.logo_url and url == self.WEBSITE_URL:
+                    agency.logo_url = self.extract_logo_url(soup)
+                
+                # Accumulate certifications from all pages
+                certs = self.extract_certifications_from_page(soup)
+                all_certifications.update(certs)
+                
+                # Accumulate sectors from all pages
+                sectors = self.extract_sectors_from_page(soup)
+                all_sectors.update(sectors)
+                
+                # Accumulate services from all pages
+                services = self.extract_services_from_page(soup)
+                for key, value in services.model_dump().items():
+                    if value:
+                        all_services[key] = True
+                
+            except Exception as e:
+                self.logger.warning(f"Error scraping {url}: {e}")
+        
+        # Update agency with accumulated data
+        if all_certifications:
+            agency.certifications = list(all_certifications)
+        
+        if all_sectors and not agency.sectors_core:
+            agency.sectors_core = list(all_sectors)
+        
+        if all_services:
+            # Merge with existing services
+            current = agency.services.model_dump()
+            current.update(all_services)
+            agency.services = AgencyServices(**current)
+        
+        # Update evidence URLs
+        agency.evidence_urls = self.evidence_urls.copy()
+        agency.collected_at = self.collected_at
+        
+        return agency
 

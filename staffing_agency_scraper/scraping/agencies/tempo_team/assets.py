@@ -9,21 +9,8 @@ from __future__ import annotations
 
 import dagster as dg
 
-from staffing_agency_scraper.lib.normalize import (
-    detect_cao_type,
-    detect_certifications,
-    detect_focus_segments,
-    detect_services,
-    extract_sectors_from_text,
-)
-from staffing_agency_scraper.lib.parse import (
-    extract_email,
-    extract_kvk_number,
-    extract_phone,
-)
 from staffing_agency_scraper.models import (
     Agency,
-    AgencyServices,
     DigitalCapabilities,
     GeoFocusType,
 )
@@ -37,11 +24,17 @@ class TempoTeamScraper(BaseAgencyScraper):
     WEBSITE_URL = "https://www.tempo-team.nl"
     BRAND_GROUP = "Randstad Groep Nederland"
 
+    # Discovered via sitemap analysis - includes legal pages for KvK
     PAGES_TO_SCRAPE = [
         "https://www.tempo-team.nl",
         "https://www.tempo-team.nl/werkgevers",
         "https://www.tempo-team.nl/over-tempo-team",
-        "https://www.tempo-team.nl/contact",
+        "https://www.tempo-team.nl/over-tempo-team/contact",
+        "https://www.tempo-team.nl/over-tempo-team/organisatie/certificering",
+        "https://www.tempo-team.nl/over-tempo-team/onze-labels",
+        "https://www.tempo-team.nl/over-tempo-team/algemeen/disclaimer",  # Legal page
+        "https://www.tempo-team.nl/over-tempo-team/algemeen/privacy",  # Privacy page
+        "https://www.tempo-team.nl/over-tempo-team/voorwaarden/gebruikersvoorwaarden-algemeen",
     ]
 
     def scrape(self) -> Agency:
@@ -55,65 +48,23 @@ class TempoTeamScraper(BaseAgencyScraper):
         """
         self.logger.info(f"Starting scrape of {self.AGENCY_NAME}")
 
+        # Initialize agency
         agency = self.create_base_agency()
         agency.brand_group = self.BRAND_GROUP
         agency.geo_focus_type = GeoFocusType.NATIONAL
+        agency.employers_page_url = f"{self.WEBSITE_URL}/werkgevers"
+        agency.contact_form_url = f"{self.WEBSITE_URL}/over-tempo-team/contact"
 
-        # Scrape homepage
-        try:
-            homepage = self.fetch_page(self.WEBSITE_URL)
-            agency.logo_url = self.extract_logo_url(homepage)
-        except Exception as e:
-            self.logger.warning(f"Error scraping homepage: {e}")
-
-        # Scrape werkgevers page
-        try:
-            werkgevers_page = self.fetch_page(f"{self.WEBSITE_URL}/werkgevers")
-            agency.services = self.extract_services_from_page(werkgevers_page)
-            agency.employers_page_url = f"{self.WEBSITE_URL}/werkgevers"
-
-            contact_link = self.find_page_url(
-                werkgevers_page, ["contact", "offerte"]
-            )
-            if contact_link:
-                agency.contact_form_url = contact_link
-        except Exception as e:
-            self.logger.warning(f"Error scraping werkgevers page: {e}")
-
-        # Scrape about page
-        try:
-            about_page = self.fetch_page(f"{self.WEBSITE_URL}/over-tempo-team")
-            page_text = about_page.get_text()
-
-            agency.certifications = detect_certifications(page_text)
-            agency.sectors_core = extract_sectors_from_text(page_text)
-
-            kvk = extract_kvk_number(page_text)
-            if kvk:
-                agency.kvk_number = kvk
-        except Exception as e:
-            self.logger.warning(f"Error scraping about page: {e}")
-
-        # Scrape contact page
-        try:
-            contact_page = self.fetch_page(f"{self.WEBSITE_URL}/contact")
-            contact_info = self.extract_contact_info(contact_page)
-            if contact_info.get("contact_phone"):
-                agency.contact_phone = contact_info["contact_phone"]
-            if contact_info.get("contact_email"):
-                agency.contact_email = contact_info["contact_email"]
-        except Exception as e:
-            self.logger.warning(f"Error scraping contact page: {e}")
-
-        # Set evidence URLs and timestamp
-        agency.evidence_urls = self.evidence_urls.copy()
-        agency.collected_at = self.collected_at
+        # Use enhanced scraping that extracts from all pages
+        agency = self.scrape_all_pages(agency)
 
         # Known facts about Tempo-Team
         agency.services.uitzenden = True
         agency.services.detacheren = True
         agency.services.werving_selectie = True
         agency.services.payrolling = True
+        agency.services.inhouse_services = True
+        agency.services.opleiden_ontwikkelen = True
 
         agency.membership = ["ABU"]
         agency.cao_type = "ABU"
@@ -129,12 +80,14 @@ class TempoTeamScraper(BaseAgencyScraper):
             "studenten",
         ]
 
-        agency.sectors_core = [
-            "logistiek",
-            "productie",
-            "horeca",
-            "retail",
-        ]
+        # Override sectors if not found
+        if not agency.sectors_core:
+            agency.sectors_core = [
+                "logistiek",
+                "productie",
+                "horeca",
+                "retail",
+            ]
 
         agency.regions_served = ["landelijk"]
 
