@@ -125,12 +125,7 @@ class BaseAgencyScraper(ABC):
 
     def extract_logo_url(self, soup: BeautifulSoup) -> str | None:
         """
-        Extract logo URL from page.
-
-        Checks multiple sources:
-        - JSON-LD structured data
-        - OG meta tags
-        - Common logo selectors
+        Basic logo extraction - override in subclass for site-specific logic.
 
         Parameters
         ----------
@@ -142,42 +137,11 @@ class BaseAgencyScraper(ABC):
         str | None
             Logo URL or None
         """
-        # First try structured data
-        structured = extract_structured_data(soup)
-        if structured.get("logo_url"):
-            return structured["logo_url"]
-        
-        # Try OG image
+        # Try OG image as a basic fallback
         og_image = soup.find("meta", attrs={"property": "og:image"})
         if og_image and og_image.get("content"):
-            content = og_image.get("content")
-            if "logo" in str(content).lower():
-                return content
+            return og_image.get("content")
         
-        # Common logo selectors
-        logo_selectors = [
-            "img.logo",
-            "img[alt*='logo']",
-            ".logo img",
-            "header img",
-            "[class*='logo'] img",
-            "a.logo img",
-            ".header-logo img",
-            ".site-logo img",
-            "#logo img",
-        ]
-
-        for selector in logo_selectors:
-            logo = soup.select_one(selector)
-            if logo:
-                src = get_attribute(logo, "src")
-                if src:
-                    # Make absolute URL
-                    if src.startswith("//"):
-                        return f"https:{src}"
-                    elif src.startswith("/"):
-                        return urljoin(self.WEBSITE_URL, src)
-                    return src
         return None
 
     def extract_services_from_page(self, soup: BeautifulSoup) -> AgencyServices:
@@ -302,10 +266,9 @@ class BaseAgencyScraper(ABC):
 
     def scrape_all_pages(self, agency: Agency) -> Agency:
         """
-        Scrape all configured pages and merge data into agency.
+        Basic scrape of all configured pages.
         
-        This is a helper method that iterates through PAGES_TO_SCRAPE
-        and extracts all available information.
+        Override this method in subclasses for custom extraction logic.
         
         Parameters
         ----------
@@ -317,69 +280,11 @@ class BaseAgencyScraper(ABC):
         Agency
             Updated agency object
         """
-        all_certifications = set()
-        all_sectors = set()
-        all_services = {}
-        
         for url in self.PAGES_TO_SCRAPE:
             try:
-                soup = self.fetch_page(url)
-                
-                # Extract contact info from every page (might be in footer)
-                contact = self.extract_contact_info(soup)
-                
-                # Update agency with found data (don't overwrite existing)
-                if contact.get("kvk_number") and not agency.kvk_number:
-                    agency.kvk_number = contact["kvk_number"]
-                    self.logger.info(f"Found KvK: {agency.kvk_number}")
-                
-                if contact.get("contact_phone") and not agency.contact_phone:
-                    agency.contact_phone = contact["contact_phone"]
-                    self.logger.info(f"Found phone: {agency.contact_phone}")
-                
-                if contact.get("contact_email") and not agency.contact_email:
-                    agency.contact_email = contact["contact_email"]
-                    self.logger.info(f"Found email: {agency.contact_email}")
-                
-                if contact.get("hq_city") and not agency.hq_city:
-                    agency.hq_city = contact["hq_city"]
-                
-                if contact.get("hq_province") and not agency.hq_province:
-                    agency.hq_province = contact["hq_province"]
-                
-                # Extract logo from homepage
-                if not agency.logo_url and url == self.WEBSITE_URL:
-                    agency.logo_url = self.extract_logo_url(soup)
-                
-                # Accumulate certifications from all pages
-                certs = self.extract_certifications_from_page(soup)
-                all_certifications.update(certs)
-                
-                # Accumulate sectors from all pages
-                sectors = self.extract_sectors_from_page(soup)
-                all_sectors.update(sectors)
-                
-                # Accumulate services from all pages
-                services = self.extract_services_from_page(soup)
-                for key, value in services.model_dump().items():
-                    if value:
-                        all_services[key] = True
-                
+                self.fetch_page(url)
             except Exception as e:
                 self.logger.warning(f"Error scraping {url}: {e}")
-        
-        # Update agency with accumulated data
-        if all_certifications:
-            agency.certifications = list(all_certifications)
-        
-        if all_sectors and not agency.sectors_core:
-            agency.sectors_core = list(all_sectors)
-        
-        if all_services:
-            # Merge with existing services
-            current = agency.services.model_dump()
-            current.update(all_services)
-            agency.services = AgencyServices(**current)
         
         # Update evidence URLs
         agency.evidence_urls = self.evidence_urls.copy()
