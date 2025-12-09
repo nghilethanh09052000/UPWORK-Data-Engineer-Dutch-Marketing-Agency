@@ -20,15 +20,17 @@ class TMIScraper(BaseAgencyScraper):
     WEBSITE_URL = "https://www.tmi.nl"
     BRAND_GROUP = None
 
-    # Discovered via sitemap
+    # Discovered via sitemap - note TMI uses trailing slashes
     PAGES_TO_SCRAPE = [
         "https://www.tmi.nl",
-        "https://www.tmi.nl/opdrachtgevers",
-        "https://www.tmi.nl/over-tmi",
-        "https://www.tmi.nl/contact",
-        "https://www.tmi.nl/diensten",
-        "https://www.tmi.nl/sectoren",
-        "https://www.tmi.nl/privacy",
+        "https://www.tmi.nl/over-tmi/",
+        "https://www.tmi.nl/over-tmi/events/",
+        "https://www.tmi.nl/over-tmi/contact/",
+        "https://www.tmi.nl/opdrachtgevers/",
+        "https://www.tmi.nl/opdrachtgevers/ggd/",
+        "https://www.tmi.nl/opdrachtgevers/ggz/",
+        "https://www.tmi.nl/academy/",
+        "https://www.tmi.nl/privacy/",  # Legal page for KvK
     ]
 
     def scrape(self) -> Agency:

@@ -24,12 +24,14 @@ class YachtScraper(BaseAgencyScraper):
     # Discovered via sitemap
     PAGES_TO_SCRAPE = [
         "https://www.yacht.nl",
-        "https://www.yacht.nl/werkgevers",
+        "https://www.yacht.nl/opdrachtgevers",  # Employers page
+        "https://www.yacht.nl/opdrachtgevers/it",
+        "https://www.yacht.nl/over-ons",
         "https://www.yacht.nl/over-yacht",
-        "https://www.yacht.nl/contact",
-        "https://www.yacht.nl/diensten",
-        "https://www.yacht.nl/expertises",
-        "https://www.yacht.nl/privacy",
+        "https://www.yacht.nl/over-ons/klachten",
+        "https://www.yacht.nl/contactinformatie",
+        "https://www.yacht.nl/zzp",
+        "https://www.yacht.nl/privacy",  # Legal page for KvK
     ]
 
     def scrape(self) -> Agency:

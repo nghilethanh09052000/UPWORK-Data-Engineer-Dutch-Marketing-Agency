@@ -20,13 +20,15 @@ class BrunelScraper(BaseAgencyScraper):
     WEBSITE_URL = "https://www.brunel.nl"
     BRAND_GROUP = "Brunel International"
 
+    # Discovered via sitemap
     PAGES_TO_SCRAPE = [
         "https://www.brunel.nl",
-        "https://www.brunel.nl/werkgevers",
-        "https://www.brunel.nl/over-brunel",
-        "https://www.brunel.nl/contact",
-        "https://www.brunel.nl/diensten",
-        "https://www.brunel.nl/sectoren",
+        "https://www.brunel.net/nl-nl",  # Main Dutch page
+        "https://www.brunel.net/nl-nl/over-brunel",
+        "https://www.brunel.net/nl-nl/contact",
+        "https://www.brunel.net/nl-nl/werkgevers",
+        "https://www.brunel.net/nl-nl/expertises",
+        "https://www.brunel.net/nl-nl/privacy",  # Legal page for KvK
     ]
 
     def scrape(self) -> Agency:

@@ -34,23 +34,12 @@ class ASATalentScraper(BaseAgencyScraper):
         "https://asatalent.nl/over-ons",
         "https://asatalent.nl/contact",
         "https://asatalent.nl/werkgevers/diensten",
-        "https://asatalent.nl/vestigingen",
+        "https://asatalent.nl/vestigingen",  # Office locations
         "https://asatalent.nl/over-ons/keurmerken-en-certificaten",
         "https://asatalent.nl/legal/privacy-statement",
         "https://asatalent.nl/legal/disclaimer",
-        "https://asatalent.nl/sitemap-asatalent",
     ]
     
-    # Individual vestiging pages for contact details
-    VESTIGING_PAGES = [
-        "https://asatalent.nl/vestigingen/asa-amsterdam-uitzendbureau",
-        "https://asatalent.nl/vestigingen/deventer-uitzendbureau",
-        "https://asatalent.nl/vestigingen/enschede-uitzendbureau",
-        "https://asatalent.nl/vestigingen/groningen-uitzendbureau",
-        "https://asatalent.nl/vestigingen/maastricht-uitzendbureau",
-        "https://asatalent.nl/vestigingen/nijmegen-uitzendbureau",
-        "https://asatalent.nl/vestigingen/utrecht-uitzendbureau",
-    ]
 
     def scrape(self) -> Agency:
         self.logger.info(f"Starting scrape of {self.AGENCY_NAME}")
@@ -73,10 +62,14 @@ class ASATalentScraper(BaseAgencyScraper):
                     agency.logo_url = self._extract_logo(soup)
 
                 # Extract office locations from vestigingen page
-                if "/vestigingen" in url.lower() and "uitzendbureau" not in url:
-                    locations = self._extract_office_locations(page_text)
+                if url == "https://asatalent.nl/vestigingen":
+                    locations, main_phone, main_email = self._extract_office_locations_from_html(soup)
                     if locations:
                         agency.office_locations = locations
+                    if main_phone and not agency.contact_phone:
+                        agency.contact_phone = main_phone
+                    if main_email and not agency.contact_email:
+                        agency.contact_email = main_email
 
                 # Extract certifications from keurmerken page
                 if "keurmerken" in url.lower():
@@ -89,17 +82,8 @@ class ASATalentScraper(BaseAgencyScraper):
             except Exception as e:
                 self.logger.warning(f"Error scraping {url}: {e}")
         
-        # Fetch individual vestiging pages for contact details
-        vestiging_contacts = self._fetch_vestiging_contacts()
-        if vestiging_contacts:
-            # Use Utrecht as main contact (largest/most central office)
-            utrecht = vestiging_contacts.get("utrecht")
-            if utrecht:
-                agency.contact_phone = utrecht.get("phone")
-                agency.contact_email = utrecht.get("email")
-                self.logger.info(f"Set main contact: {agency.contact_phone}, {agency.contact_email}")
-            
-            # Set HQ to Utrecht
+        # Set HQ to Utrecht (main office)
+        if not agency.hq_city:
             agency.hq_city = "Utrecht"
             agency.hq_province = "Utrecht"
 
@@ -147,48 +131,6 @@ class ASATalentScraper(BaseAgencyScraper):
                 return src
         return None
 
-    def _fetch_vestiging_contacts(self) -> dict:
-        """
-        Fetch contact details from individual vestiging pages.
-        
-        Returns dict with city -> {phone, email} mapping.
-        """
-        contacts = {}
-        
-        for url in self.VESTIGING_PAGES:
-            try:
-                soup = self.fetch_page(url)
-                raw_html = str(soup)
-                text = soup.get_text(separator=" ", strip=True)
-                
-                # Extract city from URL
-                city = url.split("/")[-1].replace("-uitzendbureau", "").replace("asa-", "").lower()
-                
-                # Find email (mailto or text pattern)
-                email = None
-                mailto_match = re.search(r'mailto:([^"?]+@asatalent\.nl)', raw_html)
-                if mailto_match:
-                    email = mailto_match.group(1)
-                else:
-                    email_match = re.search(r"([\w\.\-]+@asatalent\.nl)", text)
-                    if email_match:
-                        email = email_match.group(1)
-                
-                # Find phone number
-                phone = None
-                phone_match = re.search(r"(\d{3}[-\s]?\d{3}[-\s]?\d{4}|\d{3}[-\s]?\d{7})", text)
-                if phone_match:
-                    phone = phone_match.group(1)
-                
-                if email or phone:
-                    contacts[city] = {"email": email, "phone": phone}
-                    self.logger.info(f"Found contact for {city}: {phone}, {email}")
-                    
-            except Exception as e:
-                self.logger.warning(f"Error fetching vestiging {url}: {e}")
-        
-        return contacts
-
     def _extract_legal_name(self, text: str) -> str | None:
         """
         Extract legal name from disclaimer page.
@@ -203,30 +145,78 @@ class ASATalentScraper(BaseAgencyScraper):
             return legal_name
         return None
 
-    def _extract_office_locations(self, text: str) -> list[OfficeLocation]:
+    def _extract_office_locations_from_html(self, soup: BeautifulSoup) -> tuple[list[OfficeLocation], str | None, str | None]:
         """
-        Extract office locations from vestigingen page.
+        Extract office locations from vestigingen page HTML.
         
-        Pattern: "1105 AG Amsterdam" -> Amsterdam, Noord-Holland
+        HTML structure:
+        <a href="/vestigingen/...">
+            <div>
+                <h3>ASA Amsterdam</h3>
+                <p>Paalbergweg 2\n1105 AG Amsterdam</p>
+                <span onclick="tel:020-6626161">020-6626161</span>
+            </div>
+        </a>
+        
+        Returns:
+            (locations, main_phone, main_email)
         """
         locations = []
         seen_cities = set()
+        main_phone = None
+        main_email = None
         
-        # Find all postal code + city patterns
-        matches = re.findall(r"(\d{4})\s*([A-Z]{2})\s+([A-Za-z\-]+)", text)
+        # Find all office cards in grid
+        office_cards = soup.select('div.grid a[href*="/vestigingen/"]')
         
-        for postal_code, postal_letters, city in matches:
-            city_normalized = city.title()
-            if city_normalized.lower() not in seen_cities:
-                # Get province from postal code prefix
-                postal_prefix = postal_code[:2]
-                province = DUTCH_POSTAL_TO_PROVINCE.get(postal_prefix)
-                
-                locations.append(OfficeLocation(city=city_normalized, province=province))
-                seen_cities.add(city_normalized.lower())
-                self.logger.info(f"Found office location: {city_normalized}, {province}")
+        for card in office_cards:
+            # Get office name from h3
+            h3 = card.find("h3")
+            if not h3:
+                continue
+            
+            # Get address from p tag
+            p = card.find("p")
+            if not p:
+                continue
+            
+            address_text = p.get_text(separator=" ", strip=True)
+            
+            # Extract postal code and city (pattern: "1105 AG Amsterdam")
+            postal_match = re.search(r"(\d{4})\s*([A-Z]{2})\s+([A-Za-z\-]+)", address_text)
+            if not postal_match:
+                continue
+            
+            postal_code = postal_match.group(1)
+            postal_letters = postal_match.group(2)
+            city = postal_match.group(3)
+            
+            if city.lower() in seen_cities:
+                continue
+            
+            # Get province from postal code
+            postal_prefix = postal_code[:2]
+            province = DUTCH_POSTAL_TO_PROVINCE.get(postal_prefix)
+            
+            # Extract phone from span onclick (tel:030 23 33 444)
+            phone = None
+            span = card.find("span", onclick=True)
+            if span:
+                onclick = span.get("onclick", "")
+                tel_match = re.search(r"tel:([^'\"]+)", onclick)
+                if tel_match:
+                    phone = tel_match.group(1).strip().rstrip("'")
+            
+            locations.append(OfficeLocation(city=city, province=province))
+            seen_cities.add(city.lower())
+            self.logger.info(f"Found office: {city}, {province} - {phone}")
+            
+            # Use Utrecht as main contact
+            if city.lower() == "utrecht":
+                main_phone = phone
+                main_email = "utrecht@asatalent.nl"
         
-        return locations
+        return locations, main_phone, main_email
 
     def _extract_certifications(self, text: str) -> list[str]:
         """

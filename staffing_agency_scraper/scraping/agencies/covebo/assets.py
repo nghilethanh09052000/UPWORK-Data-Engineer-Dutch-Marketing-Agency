@@ -20,16 +20,16 @@ class CoveboScraper(BaseAgencyScraper):
     WEBSITE_URL = "https://www.covebo.nl"
     BRAND_GROUP = None
 
-    # Discovered via sitemap
+    # Discovered via sitemap - note Covebo uses trailing slashes
     PAGES_TO_SCRAPE = [
         "https://www.covebo.nl",
-        "https://www.covebo.nl/werkgevers",
-        "https://www.covebo.nl/over-ons",
-        "https://www.covebo.nl/contact",
-        "https://www.covebo.nl/diensten",
-        "https://www.covebo.nl/sectoren",
-        "https://www.covebo.nl/vestigingen",
-        "https://www.covebo.nl/privacy-policy",
+        "https://www.covebo.nl/over-covebo/",
+        "https://www.covebo.nl/over-covebo/contact/",
+        "https://www.covebo.nl/over-covebo/ons-verhaal/",
+        "https://www.covebo.nl/zzp/",
+        "https://www.covebo.nl/zzp/kortingen/",
+        "https://www.covebo.nl/vacatures/bouw/",
+        "https://www.covebo.nl/privacy-policy/",  # Legal page for KvK
     ]
 
     def scrape(self) -> Agency:

@@ -25,10 +25,11 @@ class HaysScraper(BaseAgencyScraper):
         "https://www.hays.nl",
         "https://www.hays.nl/werkgevers",
         "https://www.hays.nl/over-hays",
+        "https://www.hays.nl/over-hays/hays-wereldwijd",
         "https://www.hays.nl/contact",
-        "https://www.hays.nl/diensten",
-        "https://www.hays.nl/expertises",
-        "https://www.hays.nl/privacy",
+        "https://www.hays.nl/detachering",
+        "https://www.hays.nl/privacy",  # Legal page for KvK
+        "https://www.hays.nl/en/recruitment/contact-us",  # Alt contact
     ]
 
     def scrape(self) -> Agency:

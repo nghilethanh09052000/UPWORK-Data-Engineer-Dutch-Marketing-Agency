@@ -20,13 +20,16 @@ class ManpowerScraper(BaseAgencyScraper):
     WEBSITE_URL = "https://www.manpower.nl"
     BRAND_GROUP = "ManpowerGroup"
 
+    # Discovered via sitemap - note Manpower uses /nl/ prefix
     PAGES_TO_SCRAPE = [
         "https://www.manpower.nl",
-        "https://www.manpower.nl/werkgevers",
-        "https://www.manpower.nl/over-manpower",
-        "https://www.manpower.nl/contact",
-        "https://www.manpower.nl/diensten",
-        "https://www.manpower.nl/sectoren",
+        "https://www.manpower.nl/nl/werkgevers",
+        "https://www.manpower.nl/nl/werkgevers/hr-services",
+        "https://www.manpower.nl/nl/werkgevers/specialisaties",
+        "https://www.manpower.nl/nl/over-manpower",
+        "https://www.manpower.nl/nl/over-manpower/contact",
+        "https://www.manpower.nl/nl/zoek-vacatures/dienstverband",
+        "https://www.manpower.nl/nl/privacy",  # Legal page for KvK
     ]
 
     def scrape(self) -> Agency:

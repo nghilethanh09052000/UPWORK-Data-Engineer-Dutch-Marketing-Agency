@@ -20,14 +20,17 @@ class StartPeopleScraper(BaseAgencyScraper):
     WEBSITE_URL = "https://www.startpeople.nl"
     BRAND_GROUP = "USG People"
 
+    # Discovered via sitemap
     PAGES_TO_SCRAPE = [
         "https://www.startpeople.nl",
-        "https://www.startpeople.nl/werkgevers",
         "https://www.startpeople.nl/over-ons",
+        "https://www.startpeople.nl/over-start-people",
+        "https://www.startpeople.nl/werkgevers",
+        "https://www.startpeople.nl/werkgevers/diensten",
         "https://www.startpeople.nl/contact",
-        "https://www.startpeople.nl/diensten",
-        "https://www.startpeople.nl/sectoren",
-        "https://www.startpeople.nl/vestigingen",
+        "https://www.startpeople.nl/opleiding",
+        "https://www.startpeople.nl/vacatures/overheid",
+        "https://www.startpeople.nl/privacy",  # Legal page for KvK
     ]
 
     def scrape(self) -> Agency:

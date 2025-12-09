@@ -19,16 +19,16 @@ class OlympiaScraper(BaseAgencyScraper):
     WEBSITE_URL = "https://www.olympia.nl"
     BRAND_GROUP = None
 
-    # Discovered via sitemap
+    # Discovered via sitemap - note Olympia uses trailing slashes
     PAGES_TO_SCRAPE = [
         "https://www.olympia.nl",
-        "https://www.olympia.nl/werkgevers",
-        "https://www.olympia.nl/over-olympia",
-        "https://www.olympia.nl/contact",
-        "https://www.olympia.nl/diensten",
-        "https://www.olympia.nl/sectoren",
-        "https://www.olympia.nl/vestigingen",
-        "https://www.olympia.nl/privacy",
+        "https://www.olympia.nl/over-olympia/",
+        "https://www.olympia.nl/over-olympia/contact/",
+        "https://www.olympia.nl/vacatures/werkgevers/",
+        "https://www.olympia.nl/personeel/inhouse/",
+        "https://www.olympia.nl/vacatures/overig/",
+        "https://www.olympia.nl/werk/werkgevers/gvb/",
+        "https://www.olympia.nl/privacy/",  # Legal page for KvK
     ]
 
     def scrape(self) -> Agency:

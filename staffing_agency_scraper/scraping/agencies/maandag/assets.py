@@ -19,16 +19,16 @@ class MaandagScraper(BaseAgencyScraper):
     WEBSITE_URL = "https://www.maandag.nl"
     BRAND_GROUP = None
 
-    # Discovered via sitemap
+    # Discovered via sitemap - note Maandag uses maandag.com with /nl-nl/ prefix
     PAGES_TO_SCRAPE = [
         "https://www.maandag.nl",
-        "https://www.maandag.nl/werkgevers",
-        "https://www.maandag.nl/over-maandag",
-        "https://www.maandag.nl/contact",
-        "https://www.maandag.nl/diensten",
-        "https://www.maandag.nl/branches",
-        "https://www.maandag.nl/vestigingen",
-        "https://www.maandag.nl/privacy",
+        "https://www.maandag.com/nl-nl/over-ons",
+        "https://www.maandag.com/nl-nl/overheid",
+        "https://www.maandag.com/nl-nl/contact",
+        "https://www.maandag.com/nl-nl/service",
+        "https://www.maandag.com/nl-nl/zzpstart",
+        "https://www.maandag.com/nl-nl/zzp-wet-dba",
+        "https://www.maandag.com/nl-nl/privacy",  # Legal page for KvK
     ]
 
     def scrape(self) -> Agency:

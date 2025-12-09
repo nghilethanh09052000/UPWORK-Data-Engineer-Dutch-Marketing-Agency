@@ -20,15 +20,15 @@ class MichaelPageScraper(BaseAgencyScraper):
     WEBSITE_URL = "https://www.michaelpage.nl"
     BRAND_GROUP = "PageGroup"
 
-    # Discovered via sitemap
+    # Discovered via sitemap - Michael Page has extensive blog/advice content
     PAGES_TO_SCRAPE = [
         "https://www.michaelpage.nl",
-        "https://www.michaelpage.nl/werkgevers",
-        "https://www.michaelpage.nl/over-ons",
+        "https://www.michaelpage.nl/about-us",
+        "https://www.michaelpage.nl/advice/loopbaanadvies/loopbaanontwikkeling/overdraagbare-vaardigheden-ontwikkelen",
+        "https://www.michaelpage.nl/advice/managementadvies/it-talent-aantrekken-BITT24",
+        "https://www.michaelpage.nl/advice/markt-updates/amsterdam-aantrekkelijk-voor-internationale-bedrijven",
         "https://www.michaelpage.nl/contact",
-        "https://www.michaelpage.nl/diensten",
-        "https://www.michaelpage.nl/expertises",
-        "https://www.michaelpage.nl/privacy",
+        "https://www.michaelpage.nl/privacy",  # Legal page for KvK
     ]
 
     def scrape(self) -> Agency:

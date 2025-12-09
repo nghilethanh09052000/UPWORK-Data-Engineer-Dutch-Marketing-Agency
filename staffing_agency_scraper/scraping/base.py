@@ -266,9 +266,10 @@ class BaseAgencyScraper(ABC):
 
     def scrape_all_pages(self, agency: Agency) -> Agency:
         """
-        Basic scrape of all configured pages.
+        Enhanced scrape of all configured pages with automatic extraction.
         
-        Override this method in subclasses for custom extraction logic.
+        Extracts contact info, KvK, logo, sectors, certifications from all pages.
+        Override specific extraction methods in subclasses for custom logic.
         
         Parameters
         ----------
@@ -280,11 +281,62 @@ class BaseAgencyScraper(ABC):
         Agency
             Updated agency object
         """
+        all_text = ""
+        all_certifications = []
+        all_sectors = []
+        
         for url in self.PAGES_TO_SCRAPE:
             try:
-                self.fetch_page(url)
+                soup = self.fetch_page(url)
+                page_text = soup.get_text()
+                all_text += " " + page_text
+                
+                # Extract contact info from each page
+                contact_info = self.extract_contact_info(soup)
+                
+                # Update agency with found contact info (don't overwrite existing)
+                if not agency.kvk_number and contact_info.get("kvk_number"):
+                    agency.kvk_number = contact_info["kvk_number"]
+                    self.logger.info(f"Found KvK: {agency.kvk_number}")
+                
+                if not agency.contact_phone and contact_info.get("contact_phone"):
+                    agency.contact_phone = contact_info["contact_phone"]
+                    self.logger.info(f"Found phone: {agency.contact_phone}")
+                
+                if not agency.contact_email and contact_info.get("contact_email"):
+                    agency.contact_email = contact_info["contact_email"]
+                    self.logger.info(f"Found email: {agency.contact_email}")
+                
+                if not agency.hq_city and contact_info.get("hq_city"):
+                    agency.hq_city = contact_info["hq_city"]
+                
+                if not agency.hq_province and contact_info.get("hq_province"):
+                    agency.hq_province = contact_info["hq_province"]
+                
+                # Extract logo from each page (use first found)
+                if not agency.logo_url:
+                    logo = self.extract_logo_url(soup)
+                    if logo:
+                        agency.logo_url = logo
+                        self.logger.info(f"Found logo: {agency.logo_url}")
+                
+                # Collect certifications and sectors
+                certs = self.extract_certifications_from_page(soup)
+                all_certifications.extend(certs)
+                
+                sectors = self.extract_sectors_from_page(soup)
+                all_sectors.extend(sectors)
+                
             except Exception as e:
                 self.logger.warning(f"Error scraping {url}: {e}")
+        
+        # Dedupe and set certifications
+        if all_certifications:
+            agency.certifications = list(set(all_certifications))
+        
+        # Dedupe and set sectors
+        if all_sectors:
+            agency.sectors_core = list(set(all_sectors))[:10]  # Limit to top 10
         
         # Update evidence URLs
         agency.evidence_urls = self.evidence_urls.copy()
