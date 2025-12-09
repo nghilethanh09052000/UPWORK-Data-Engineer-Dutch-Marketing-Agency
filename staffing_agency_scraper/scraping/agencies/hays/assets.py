@@ -9,11 +9,15 @@ International staffing company with 50+ years experience globally
 from __future__ import annotations
 
 import re
+import json
 
 import dagster as dg
 from bs4 import BeautifulSoup
 from typing import Any, Dict, List, Set
 
+import asyncio
+from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, LXMLWebScrapingStrategy, JsonCssExtractionStrategy
+from crawl4ai.extraction_strategy import LLMExtractionStrategy
 from staffing_agency_scraper.lib.fetch import fetch_with_retry
 from staffing_agency_scraper.models import (
     Agency,
@@ -34,39 +38,44 @@ class HaysScraper(BaseAgencyScraper):
     AGENCY_NAME = "Hays Nederland"
     WEBSITE_URL = "https://www.hays.nl"
     BRAND_GROUP = "Hays plc"
-    SITEMAP_URL = "https://www.hays.nl/sitemap.xml"
-
-    # Each page has a name, url, and list of extraction functions to apply
+    # Each page has a name, url, list of extraction functions (HTML/bs4 only),
+    # and whether to use AI (crawl4ai) for secondary extraction.
     PAGES_TO_SCRAPE: List[Dict[str, Any]] = [
         {
             "name": "home_nl",
             "url": "https://www.hays.nl/home",
-            "functions": ["logo", "sectors", "services", "chatbot"],
+            "functions": ["logo", "sectors", "services"],
+            "use_ai": True,
         },
         {
             "name": "contact_nl",
             "url": "https://www.hays.nl/contact",
             "functions": ["contact"],
+            "use_ai": True,
         },
         {
             "name": "services_nl",
             "url": "https://www.hays.nl/al-onze-diensten",
             "functions": ["services"],
+            "use_ai": True,
         },
         {
             "name": "about_nl",
             "url": "https://www.hays.nl/over-hays",
-            "functions": ["logo", "sectors"],
+            "functions": ["sectors"],
+            "use_ai": True,
         },
         {
             "name": "privacy_nl",
             "url": "https://www.hays.nl/herzien-privacybeleid",
             "functions": ["legal"],
+            "use_ai": True,
         },
         {
             "name": "detaching_nl",
             "url": "https://www.hays.nl/detachering",
             "functions": ["services"],
+            "use_ai": True,
         },
     ]
 
@@ -82,78 +91,41 @@ class HaysScraper(BaseAgencyScraper):
         all_sectors: Set[str] = set()
         has_chatbot = False
 
-        # Fetch sitemap upstream and prepare nl-only URLs
-        sitemap_urls = self.get_sitemap_urls()
-        nl_sitemap_urls = self._filter_nl_urls(sitemap_urls)
-        base_urls = {p["url"] for p in self.PAGES_TO_SCRAPE}
-
         for page in self.PAGES_TO_SCRAPE:
             url = page["url"]
+            use_ai = page.get("use_ai", False)
             try:
+                # First: plain fetch, then functions
                 soup = self.fetch_page(url)
                 page_text = soup.get_text(separator=" ", strip=True)
                 all_text += " " + page_text
-                functions = set(page.get("functions", []))
+                functions = list(page.get("functions", []))
+                has_chatbot = self._apply_functions_normal(
+                    agency=agency,
+                    functions=functions,
+                    soup=soup,
+                    page_text=page_text,
+                    all_sectors=all_sectors,
+                    has_chatbot=has_chatbot,
+                    url=url,
+                )
 
-                # Extract logo
-                if "logo" in functions and not agency.logo_url:
-                    agency.logo_url = self._extract_logo(soup)
-
-                # Extract specialisms/sectors
-                if "sectors" in functions:
-                    sectors = self._extract_specialisms(soup, url)
-                    all_sectors.update(sectors)
-
-                # Extract services
-                if "services" in functions:
-                    services = self._extract_services(soup, url)
-                    if services.detacheren:
-                        agency.services.detacheren = True
-                    if services.werving_selectie:
-                        agency.services.werving_selectie = True
-                    if services.msp:
-                        agency.services.msp = True
-                    if services.rpo:
-                        agency.services.rpo = True
-                    if services.executive_search:
-                        agency.services.executive_search = True
-                    if services.zzp_bemiddeling:
-                        agency.services.zzp_bemiddeling = True
-
-                # Chatbot detection
-                if "chatbot" in functions:
-                    has_chatbot = has_chatbot or self._check_chatbot(soup, page_text)
-
-                # Extract legal info from privacy page
-                if "legal" in functions:
-                    kvk = self._extract_kvk(page_text)
-                    if kvk:
-                        agency.kvk_number = kvk
-                    legal_name = self._extract_legal_name(page_text)
-                    if legal_name:
-                        agency.legal_name = legal_name
-
-                # Extract contact info
-                if "contact" in functions:
-                    contact_info = self._extract_contact_info(soup, url)
-                    if contact_info.get("offices"):
-                        agency.office_locations = contact_info["offices"]
-                    if contact_info.get("phone") and not agency.contact_phone:
-                        agency.contact_phone = contact_info["phone"]
-                    if contact_info.get("email") and not agency.contact_email:
-                        agency.contact_email = contact_info["email"]
-                    if contact_info.get("hq_city") and not agency.hq_city:
-                        agency.hq_city = contact_info["hq_city"]
-                    if contact_info.get("hq_province") and not agency.hq_province:
-                        agency.hq_province = contact_info["hq_province"]
+                # Second: if use_ai, refetch with crawl4ai and re-apply functions to fill gaps
+                if use_ai:
+                    soup_ai, page_text_ai = self.fetch_page_ai(url)
+                    if page_text_ai:
+                        all_text += " " + page_text_ai
+                    has_chatbot = self._apply_functions_ai(
+                        agency=agency,
+                        soup=soup_ai,
+                        page_text=page_text_ai,
+                        all_sectors=all_sectors,
+                        has_chatbot=has_chatbot,
+                        url=url,
+                    )
 
             except Exception as e:
                 self.logger.warning(f"Error scraping {url}: {e}")
-
-        # If data is still too sparse, leverage sitemap URLs (nl only) as fallback
-        if self._needs_more_data(agency):
-            extra_urls = [u for u in nl_sitemap_urls if u not in base_urls]
-            self._crawl_additional_pages(agency, extra_urls, all_sectors)
 
         # Set sectors_core from extracted specialisms (remove duplicates)
         if all_sectors:
@@ -217,147 +189,143 @@ class HaysScraper(BaseAgencyScraper):
         self.logger.info(f"Completed scrape of {self.AGENCY_NAME}")
         return agency
 
-    # ---------------------------
-    # Upstream: sitemap handling
-    # ---------------------------
-    def get_sitemap_urls(self) -> List[str]:
-        """Fetch and parse sitemap URLs (upstream helper)."""
-        try:
-            resp = fetch_with_retry(self.SITEMAP_URL)
-            locs = re.findall(r"<loc>(.*?)</loc>", resp.text)
-            urls = [u.strip() for u in locs if u.strip()]
-            self.logger.info(f"✓ Fetched {len(urls)} URLs from sitemap")
-            return urls
-        except Exception as e:
-            self.logger.warning(f"Failed to fetch sitemap: {e}")
-            return []
+    def _apply_functions_normal(
+        self,
+        agency: Agency,
+        functions: List[str],
+        soup: BeautifulSoup,
+        page_text: str,
+        all_sectors: Set[str],
+        has_chatbot: bool,
+        url: str,
+    ) -> bool:
+        """Apply non-AI functions (bs4) in order, honoring already-filled fields."""
+        for func in functions:
+            if func == "logo":
+                if not agency.logo_url:
+                    agency.logo_url = self._extract_logo(soup)
 
-    def _filter_nl_urls(self, urls: List[str]) -> List[str]:
-        """Keep only NL paths (exclude /en/ or other languages)."""
-        filtered = []
-        for u in urls:
-            if not u.startswith(self.WEBSITE_URL):
-                continue
-            path = u[len(self.WEBSITE_URL):]
-            if "/en/" in path or path.startswith("/en"):
-                continue
-            filtered.append(u)
-        self.logger.info(f"✓ Filtered to {len(filtered)} NL URLs from sitemap")
-        return filtered
+            elif func == "sectors":
+                sectors = self._extract_specialisms(soup, url)
+                all_sectors.update(sectors)
 
-    # ---------------------------
-    # Fallback crawling for missing data
-    # ---------------------------
-    def _needs_more_data(self, agency: Agency) -> bool:
-        """Check if key fields are missing and we should try extra pages."""
-        if not agency.sectors_core:
-            return True
-        if not agency.office_locations:
-            return True
-        if not agency.contact_phone or not agency.contact_email:
-            return True
-        if not agency.logo_url:
-            return True
-        # If all services are False, try more
-        services = agency.services
-        if not any(
-            [
-                services.uitzenden,
-                services.detacheren,
-                services.werving_selectie,
-                services.zzp_bemiddeling,
-                services.msp,
-                services.rpo,
-                services.executive_search,
-            ]
-        ):
-            return True
-        return False
+            elif func == "services":
+                services = self._extract_services(soup, url)
+                if services.detacheren:
+                    agency.services.detacheren = True
+                if services.werving_selectie:
+                    agency.services.werving_selectie = True
+                if services.msp:
+                    agency.services.msp = True
+                if services.rpo:
+                    agency.services.rpo = True
+                if services.executive_search:
+                    agency.services.executive_search = True
+                if services.zzp_bemiddeling:
+                    agency.services.zzp_bemiddeling = True
 
-    def _crawl_additional_pages(
-        self, agency: Agency, urls: List[str], all_sectors: Set[str], max_pages: int = 15
-    ) -> None:
-        """Use extra sitemap URLs to fill missing fields (lightweight fallback)."""
-        tried = 0
-        for url in urls:
-            if tried >= max_pages:
-                break
-            tried += 1
-            try:
-                soup = self.fetch_page(url)
-                page_text = soup.get_text(separator=" ", strip=True)
+            elif func == "chatbot":
+                has_chatbot = has_chatbot or self._check_chatbot(soup, page_text)
 
-                # Sectors
-                if not agency.sectors_core:
-                    sectors = self._extract_specialisms(soup, url)
-                    all_sectors.update(sectors)
-
-                # Services
-                if not any(
-                    [
-                        agency.services.uitzenden,
-                        agency.services.detacheren,
-                        agency.services.werving_selectie,
-                        agency.services.zzp_bemiddeling,
-                        agency.services.msp,
-                        agency.services.rpo,
-                        agency.services.executive_search,
-                    ]
-                ):
-                    services = self._extract_services(soup, url)
-                    if services.detacheren:
-                        agency.services.detacheren = True
-                    if services.werving_selectie:
-                        agency.services.werving_selectie = True
-                    if services.msp:
-                        agency.services.msp = True
-                    if services.rpo:
-                        agency.services.rpo = True
-                    if services.executive_search:
-                        agency.services.executive_search = True
-                    if services.zzp_bemiddeling:
-                        agency.services.zzp_bemiddeling = True
-
-                # Contact / offices
-                if not agency.contact_phone or not agency.contact_email or not agency.office_locations:
-                    if "contact" in url or "office" in url or "kantoor" in url:
-                        contact_info = self._extract_contact_info(soup, url)
-                        if contact_info.get("offices"):
-                            agency.office_locations = contact_info["offices"]
-                        if contact_info.get("phone") and not agency.contact_phone:
-                            agency.contact_phone = contact_info["phone"]
-                        if contact_info.get("email") and not agency.contact_email:
-                            agency.contact_email = contact_info["email"]
-                        if contact_info.get("hq_city") and not agency.hq_city:
-                            agency.hq_city = contact_info["hq_city"]
-                        if contact_info.get("hq_province") and not agency.hq_province:
-                            agency.hq_province = contact_info["hq_province"]
-
-                # Legal
-                if not agency.kvk_number or not agency.legal_name:
+            elif func == "legal":
+                if not agency.kvk_number:
                     kvk = self._extract_kvk(page_text)
-                    if kvk and not agency.kvk_number:
+                    if kvk:
                         agency.kvk_number = kvk
+                if not agency.legal_name:
                     legal_name = self._extract_legal_name(page_text)
-                    if legal_name and not agency.legal_name:
+                    if legal_name:
                         agency.legal_name = legal_name
 
-                # AI / chatbot
-                if not agency.ai_capabilities.chatbot_for_candidates:
-                    has_chatbot = self._check_chatbot(soup, page_text)
-                    if has_chatbot:
-                        agency.ai_capabilities.chatbot_for_candidates = True
-                        agency.ai_capabilities.chatbot_for_clients = True
+            elif func == "contact":
+                contact_info = self._extract_contact_info(soup, url)
+                if contact_info.get("offices"):
+                    agency.office_locations = contact_info["offices"]
+                if contact_info.get("phone") and not agency.contact_phone:
+                    agency.contact_phone = contact_info["phone"]
+                if contact_info.get("email") and not agency.contact_email:
+                    agency.contact_email = contact_info["email"]
+                if contact_info.get("hq_city") and not agency.hq_city:
+                    agency.hq_city = contact_info["hq_city"]
+                if contact_info.get("hq_province") and not agency.hq_province:
+                    agency.hq_province = contact_info["hq_province"]
 
-                # Digital capabilities
-                if not agency.digital_capabilities.candidate_portal:
-                    agency.digital_capabilities = self._extract_digital_capabilities(page_text)
+        return has_chatbot
 
-                if not self._needs_more_data(agency):
-                    break
+    def _apply_functions_ai(
+        self,
+        agency: Agency,
+        soup: BeautifulSoup,
+        page_text: str,
+        all_sectors: Set[str],
+        has_chatbot: bool,
+        url: str,
+    ) -> bool:
+        """Apply AI-backed extraction to fill gaps after normal pass."""
+        # AI capabilities
+        ai_caps = self._extract_ai_capabilities(page_text, has_chatbot)
+        if ai_caps.chatbot_for_candidates:
+            agency.ai_capabilities.chatbot_for_candidates = True
+            agency.ai_capabilities.chatbot_for_clients = True
+        if ai_caps.internal_ai_matching:
+            agency.ai_capabilities.internal_ai_matching = True
+        if ai_caps.predictive_planning:
+            agency.ai_capabilities.predictive_planning = True
+        if ai_caps.ai_screening:
+            agency.ai_capabilities.ai_screening = True
 
-            except Exception as e:
-                self.logger.warning(f"Fallback crawl error on {url}: {e}")
+        # Digital capabilities (only if still empty)
+        if not any(
+            [
+                agency.digital_capabilities.client_portal,
+                agency.digital_capabilities.candidate_portal,
+                agency.digital_capabilities.mobile_app,
+                agency.digital_capabilities.api_available,
+                agency.digital_capabilities.realtime_vacancy_feed,
+                agency.digital_capabilities.realtime_availability_feed,
+                agency.digital_capabilities.self_service_contracting,
+            ]
+        ):
+            agency.digital_capabilities = self._extract_digital_capabilities(page_text)
+
+        # Membership / CAO if still unknown
+        if (not agency.membership) or (agency.cao_type == CaoType.ONBEKEND):
+            self._extract_membership_and_cao(agency, page_text)
+
+        # AI-driven extraction for missing fields
+        self._fetch_ai_phase_system(agency, page_text, url)
+        self._fetch_ai_pricing(agency, page_text, url)
+        self._fetch_ai_reviews(agency, page_text, url)
+        self._fetch_ai_certifications(agency, page_text, url)
+        self._fetch_ai_takeover_policy(agency, page_text, url)
+        self._fetch_ai_performance_metrics(agency, page_text, url)
+        self._fetch_ai_kvk_number(agency, page_text, url)
+
+        return has_chatbot
+
+    # ---------------------------
+    # AI-powered fetch for pages marked use_ai=True
+    # ---------------------------
+    def fetch_page_ai(self, url: str) -> tuple[BeautifulSoup, str]:
+        """Fetch a page using crawl4ai (headless-capable) and return soup + text."""
+        self.logger.info(f"[AI Fetch] {url}")
+
+        async def _fetch() -> str:
+            async with AsyncWebCrawler() as crawler:
+                result = await crawler.arun(
+                    url=url,
+                    config=CrawlerRunConfig(
+                        scraping_strategy=LXMLWebScrapingStrategy(),
+                    ),
+                )
+                return getattr(result, "html", "") or ""
+
+        html = asyncio.run(_fetch())
+        soup = BeautifulSoup(html, "html.parser")
+        text = soup.get_text(separator=" ", strip=True)
+        if url not in self.evidence_urls:
+            self.evidence_urls.append(url)
+        return soup, text
 
     def _extract_logo(self, soup: BeautifulSoup) -> str | None:
         """Extract logo from header."""
@@ -716,6 +684,313 @@ class HaysScraper(BaseAgencyScraper):
             chatbot_for_clients=chatbot_for_clients,
         )
 
+    # ---------------------------
+    # AI-driven extraction functions using crawl4ai
+    # ---------------------------
+    
+    async def _fetch_ai_data(self, url: str, extraction_prompt: str) -> Dict[str, Any]:
+        """Fetch and extract data from a URL using crawl4ai with AI extraction."""
+        try:
+            async with AsyncWebCrawler() as crawler:
+                result = await crawler.arun(
+                    url=url,
+                    config=CrawlerRunConfig(
+                        scraping_strategy=LXMLWebScrapingStrategy(),
+                    ),
+                )
+                # Return the text content for AI processing
+                text = result.markdown if hasattr(result, 'markdown') else getattr(result, "cleaned_html", "")
+                return {"text": text, "html": getattr(result, "html", "")}
+        except Exception as e:
+            self.logger.warning(f"Error in _fetch_ai_data for {url}: {e}")
+            return {"text": "", "html": ""}
+    
+    def _fetch_ai_kvk_number(self, agency: Agency, text: str, url: str) -> None:
+        """Extract KvK number using AI-fetched content."""
+        if agency.kvk_number:
+            return
+        
+        # Use crawl4ai to intelligently find KvK number
+        async def extract():
+            data = await self._fetch_ai_data(url, "Extract the KvK (Kamer van Koophandel) registration number if present.")
+            content = data.get("text", "") + " " + data.get("html", "")
+            
+            # Look for 8-digit KvK number
+            import re
+            kvk_match = re.search(r"(?:KvK|kvk|chamber of commerce)[\s\-:]*(\d{8})", content, re.IGNORECASE)
+            if kvk_match:
+                agency.kvk_number = kvk_match.group(1)
+                self.logger.info(f"✓ [AI] Found KvK: {agency.kvk_number} | Source: {url}")
+        
+        try:
+            asyncio.run(extract())
+        except Exception as e:
+            self.logger.warning(f"Error extracting KvK: {e}")
+
+    def _fetch_ai_phase_system(self, agency: Agency, text: str, url: str) -> None:
+        """Extract phase system (fasensysteem) using AI-fetched content."""
+        if agency.phase_system:
+            return
+        
+        async def extract():
+            data = await self._fetch_ai_data(url, "Extract information about phase system (fasensysteem) and inlenersbeloning")
+            content = (data.get("text", "") + " " + data.get("html", "")).lower()
+            
+            if "fase" in content or "phase" in content:
+                if "3 fasen" in content or "3 phases" in content or "fase 3" in content:
+                    agency.phase_system = "3_fasen"
+                    self.logger.info(f"✓ [AI] Found phase_system: 3_fasen | Source: {url}")
+                elif "4 fasen" in content or "4 phases" in content:
+                    agency.phase_system = "4_fasen"
+                    self.logger.info(f"✓ [AI] Found phase_system: 4_fasen | Source: {url}")
+            
+            if "inlenersbeloning" in content:
+                if "dag 1" in content or "day 1" in content or "vanaf dag 1" in content:
+                    agency.applies_inlenersbeloning_from_day1 = True
+                    self.logger.info(f"✓ [AI] Found applies_inlenersbeloning_from_day1: True | Source: {url}")
+                agency.uses_inlenersbeloning = True
+                self.logger.info(f"✓ [AI] Found uses_inlenersbeloning: True | Source: {url}")
+        
+        try:
+            asyncio.run(extract())
+        except Exception as e:
+            self.logger.warning(f"Error extracting phase system: {e}")
+
+    def _fetch_ai_pricing(self, agency: Agency, text: str, url: str) -> None:
+        """Extract pricing information using crawl4ai."""
+        async def extract():
+            data = await self._fetch_ai_data(url, "Extract pricing information including hourly rates, omrekenfactor, markup, and pricing transparency")
+            content = (data.get("text", "") + " " + data.get("html", "")).lower()
+            
+            # Look for hourly rates in text
+            if ("uur" in content or "hourly" in content) and "€" in content:
+                # Find numbers near € symbols
+                import re
+                numbers = re.findall(r"€\s*(\d+(?:[.,]\d+)?)", content)
+                if numbers and len(numbers) >= 2:
+                    try:
+                        rates = [float(n.replace(",", ".")) for n in numbers[:2]]
+                        rates.sort()
+                        if 10 <= rates[0] <= 200 and 10 <= rates[-1] <= 200:
+                            agency.avg_hourly_rate_low = rates[0]
+                            agency.avg_hourly_rate_high = rates[-1]
+                            self.logger.info(f"✓ [AI] Found hourly rates: €{rates[0]}-€{rates[-1]} | Source: {url}")
+                    except:
+                        pass
+            
+            # Look for omrekenfactor/markup
+            if "omrekenfactor" in content or "markup" in content:
+                import re
+                factors = re.findall(r"(\d+(?:[.,]\d+)?)", content)
+                if factors:
+                    try:
+                        nums = [float(f.replace(",", ".")) for f in factors if 1.0 <= float(f.replace(",", ".")) <= 3.0]
+                        if nums:
+                            agency.omrekenfactor_min = min(nums)
+                            agency.omrekenfactor_max = max(nums)
+                            self.logger.info(f"✓ [AI] Found omrekenfactor: {min(nums)}-{max(nums)} | Source: {url}")
+                    except:
+                        pass
+            
+            # Pricing transparency
+            if agency.pricing_transparency is None:
+                if any(kw in content for kw in ["transparant", "transparent", "open prijzen", "open pricing"]):
+                    agency.pricing_transparency = True
+                    self.logger.info(f"✓ [AI] Found pricing_transparency: True | Source: {url}")
+            
+            # No cure no pay
+            if agency.no_cure_no_pay is None:
+                if "no cure no pay" in content or "no cure, no pay" in content:
+                    agency.no_cure_no_pay = True
+                    self.logger.info(f"✓ [AI] Found no_cure_no_pay: True | Source: {url}")
+        
+        try:
+            asyncio.run(extract())
+        except Exception as e:
+            self.logger.warning(f"Error extracting pricing: {e}")
+
+    def _fetch_ai_reviews(self, agency: Agency, text: str, url: str) -> None:
+        """Extract review rating and count using crawl4ai."""
+        async def extract():
+            data = await self._fetch_ai_data(url, "Extract review ratings and review count if present")
+            content = (data.get("text", "") + " " + data.get("html", "")).lower()
+            
+            # Look for ratings
+            if agency.review_rating is None:
+                if any(kw in content for kw in ["rating", "score", "beoordeling", "sterren", "stars"]):
+                    import re
+                    # Find rating out of 5
+                    rating_match = re.search(r"(\d+(?:[.,]\d+)?)\s*/\s*5", content)
+                    if rating_match:
+                        try:
+                            rating = float(rating_match.group(1).replace(",", "."))
+                            if 0 <= rating <= 5:
+                                agency.review_rating = rating
+                                self.logger.info(f"✓ [AI] Found review_rating: {rating} | Source: {url}")
+                        except:
+                            pass
+            
+            # Look for review count
+            if agency.review_count is None:
+                if any(kw in content for kw in ["review", "beoordeling"]):
+                    import re
+                    count_match = re.search(r"(\d+)\s+(?:reviews|beoordelingen)", content)
+                    if count_match:
+                        try:
+                            count = int(count_match.group(1))
+                            if count > 0:
+                                agency.review_count = count
+                                self.logger.info(f"✓ [AI] Found review_count: {count} | Source: {url}")
+                        except:
+                            pass
+        
+        try:
+            asyncio.run(extract())
+        except Exception as e:
+            self.logger.warning(f"Error extracting reviews: {e}")
+
+    def _fetch_ai_certifications(self, agency: Agency, text: str, url: str) -> None:
+        """Extract certifications using crawl4ai."""
+        if agency.certifications:
+            return
+        
+        async def extract():
+            data = await self._fetch_ai_data(url, "Extract certifications and quality standards")
+            content = (data.get("text", "") + " " + data.get("html", "")).lower()
+            
+            certs = []
+            cert_keywords = {
+                "iso 9001": "ISO 9001",
+                "iso9001": "ISO 9001",
+                "sna": "SNA",
+                "nba": "NBA",
+                "psom": "PSOM",
+                "vcr": "VCR",
+                "sri": "SRI",
+            }
+            
+            for keyword, cert_name in cert_keywords.items():
+                if keyword in content and cert_name not in certs:
+                    certs.append(cert_name)
+                    self.logger.info(f"✓ [AI] Found certification: {cert_name} | Source: {url}")
+            
+            if certs:
+                agency.certifications = certs
+        
+        try:
+            asyncio.run(extract())
+        except Exception as e:
+            self.logger.warning(f"Error extracting certifications: {e}")
+
+    def _fetch_ai_takeover_policy(self, agency: Agency, text: str, url: str) -> None:
+        """Extract takeover/overname policy using crawl4ai."""
+        async def extract():
+            data = await self._fetch_ai_data(url, "Extract takeover policy, overname policy, free takeover period")
+            content = (data.get("text", "") + " " + data.get("html", "")).lower()
+            
+            if "overname" in content or "takeover" in content:
+                import re
+                # Look for free hours/weeks
+                if agency.takeover_policy.free_takeover_hours is None:
+                    hours_match = re.search(r"(\d+)\s*uur.*?(?:gratis|free|kosteloos)", content)
+                    if hours_match:
+                        try:
+                            hours = int(hours_match.group(1))
+                            agency.takeover_policy.free_takeover_hours = hours
+                            self.logger.info(f"✓ [AI] Found free_takeover_hours: {hours} | Source: {url}")
+                        except:
+                            pass
+                
+                if agency.takeover_policy.free_takeover_weeks is None:
+                    weeks_match = re.search(r"(\d+)\s*(?:weken|weeks).*?(?:gratis|free|kosteloos)", content)
+                    if weeks_match:
+                        try:
+                            weeks = int(weeks_match.group(1))
+                            agency.takeover_policy.free_takeover_weeks = weeks
+                            self.logger.info(f"✓ [AI] Found free_takeover_weeks: {weeks} | Source: {url}")
+                        except:
+                            pass
+                
+                # Look for fee
+                if agency.takeover_policy.overname_fee_hint is None:
+                    fee_match = re.search(r"overname.*?€\s*(\d+[.,]?\d*)", content)
+                    if fee_match:
+                        agency.takeover_policy.overname_fee_hint = f"€{fee_match.group(1)}"
+                        self.logger.info(f"✓ [AI] Found overname_fee_hint: €{fee_match.group(1)} | Source: {url}")
+        
+        try:
+            asyncio.run(extract())
+        except Exception as e:
+            self.logger.warning(f"Error extracting takeover policy: {e}")
+
+    def _fetch_ai_performance_metrics(self, agency: Agency, text: str, url: str) -> None:
+        """Extract performance metrics using crawl4ai."""
+        async def extract():
+            data = await self._fetch_ai_data(url, "Extract performance metrics: time to fill, placements, candidate pool size, speed claims")
+            content = (data.get("text", "") + " " + data.get("html", "")).lower()
+            
+            import re
+            
+            # Time to fill
+            if agency.avg_time_to_fill_days is None:
+                if "dag" in content or "day" in content:
+                    time_match = re.search(r"(\d+)\s*(?:dagen|days)", content)
+                    if time_match:
+                        try:
+                            days = int(time_match.group(1))
+                            if 1 <= days <= 90:
+                                agency.avg_time_to_fill_days = days
+                                self.logger.info(f"✓ [AI] Found avg_time_to_fill_days: {days} | Source: {url}")
+                        except:
+                            pass
+            
+            # Annual placements
+            if agency.annual_placements_estimate is None:
+                if "placement" in content or "plaatsing" in content:
+                    placement_match = re.search(r"(\d+[.,]?\d*)\s*(?:placements|plaatsingen)", content)
+                    if placement_match:
+                        try:
+                            count = int(placement_match.group(1).replace(".", "").replace(",", ""))
+                            if count > 10:
+                                agency.annual_placements_estimate = count
+                                self.logger.info(f"✓ [AI] Found annual_placements_estimate: {count} | Source: {url}")
+                        except:
+                            pass
+            
+            # Candidate pool
+            if agency.candidate_pool_size_estimate is None:
+                if any(kw in content for kw in ["database", "pool", "netwerk", "network", "kandidaten", "candidates"]):
+                    pool_match = re.search(r"(\d+[.,]?\d*)\s*(?:candidates|kandidaten)", content)
+                    if pool_match:
+                        try:
+                            count = int(pool_match.group(1).replace(".", "").replace(",", ""))
+                            if count > 100:
+                                agency.candidate_pool_size_estimate = count
+                                self.logger.info(f"✓ [AI] Found candidate_pool_size_estimate: {count} | Source: {url}")
+                        except:
+                            pass
+            
+            # Speed claims
+            if not agency.speed_claims:
+                speed_keywords = [
+                    ("24 uur", "24_hours"),
+                    ("24 hours", "24_hours"),
+                    ("48 uur", "48_hours"),
+                    ("48 hours", "48_hours"),
+                    ("snel", "fast_turnaround"),
+                    ("quick", "fast_turnaround"),
+                    ("express", "express_service"),
+                ]
+                for keyword, claim in speed_keywords:
+                    if keyword in content and claim not in agency.speed_claims:
+                        agency.speed_claims.append(claim)
+                        self.logger.info(f"✓ [AI] Found speed_claim: {claim} | Source: {url}")
+        
+        try:
+            asyncio.run(extract())
+        except Exception as e:
+            self.logger.warning(f"Error extracting performance metrics: {e}")
+
     def _extract_focus_segments(self, text: str) -> list[str]:
         """Extract focus segments from text."""
         segments = []
@@ -804,18 +1079,9 @@ class HaysScraper(BaseAgencyScraper):
 
 
 @dg.asset(group_name="agencies")
-def hays_sitemap() -> List[str]:
-    """Upstream asset: fetch sitemap URLs for Hays (nl-only filtered downstream)."""
-    scraper = HaysScraper()
-    return scraper.get_sitemap_urls()
-
-
-@dg.asset(group_name="agencies")
-def hays_scrape(hays_sitemap: List[str]) -> dg.Output[dict]:
+def hays_scrape() -> dg.Output[dict]:
     """Scrape Hays Netherlands website."""
     scraper = HaysScraper()
-    # We pass sitemap into scraper via instance variable for potential future use
-    # (currently sitemap is fetched again inside scrape for freshness).
     agency = scraper.scrape()
     output_path = scraper.save_to_json(agency)
     return dg.Output(

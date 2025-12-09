@@ -98,7 +98,8 @@ class BaseAgencyScraper(ABC):
         """
         self.logger.info(f"Fetching: {url}")
         response = fetch_with_retry(url)
-        self.evidence_urls.append(url)
+        if url not in self.evidence_urls:
+            self.evidence_urls.append(url)
         return parse_html(response.text)
 
     def extract_contact_info(self, soup: BeautifulSoup) -> dict:
