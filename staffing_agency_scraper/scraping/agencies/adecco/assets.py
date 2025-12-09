@@ -45,14 +45,11 @@ class AdeccoScraper(BaseAgencyScraper):
     # Adecco uses /nl-nl/ path prefix for Dutch content
     # URLs discovered from sitemap analysis
     PAGES_TO_SCRAPE = [
-        "https://www.adecco.nl",
-        "https://www.adecco.nl/nl-nl/werkgevers",
-        "https://www.adecco.nl/nl-nl/over-adecco",
-        "https://www.adecco.nl/nl-nl/over-adecco/de-adecco-group",
-        "https://www.adecco.nl/nl-nl/policy/privacy-policy",
+        "https://www.adecco.com/nl-nl",  # Main page (has logo SVG)
+        "https://www.adecco.com/nl-nl/werkgevers",  # Employers page - services, clients info
         "https://www.adecco.com/nl-nl/work-in-holland",  # Lists sectors & cities
-        "https://www.adecco-jobs.com/amazon/en-nl/contact/",  # Has phone & email (contact form)
-        "https://www.adecco-jobs.com/amazon/en-nl/privacy-policy/",  # Has KvK, address, email
+        "https://www.adecco-jobs.com/amazon/nl-nl/contact/",  # Has phone & email (contact form)
+        "https://www.adecco-jobs.com/amazon/nl-nl/privacy-policy/",  # Has KvK, address, email
     ]
     
     # Jobs API endpoint for fetching live job data
@@ -63,8 +60,8 @@ class AdeccoScraper(BaseAgencyScraper):
 
         agency = self.create_base_agency()
         agency.geo_focus_type = GeoFocusType.INTERNATIONAL
-        agency.employers_page_url = "https://www.adecco.com/nl-nl/work-in-holland"
-        agency.contact_form_url = "https://www.adecco-jobs.com/amazon/en-nl/contact/"
+        agency.employers_page_url = "https://www.adecco.com/nl-nl/werkgevers"
+        agency.contact_form_url = "https://www.adecco-jobs.com/amazon/nl-nl/contact/"
 
         # Scrape all pages and extract data
         all_text = ""
@@ -87,10 +84,12 @@ class AdeccoScraper(BaseAgencyScraper):
                     if not agency.contact_email:
                         agency.contact_email = self._extract_email(soup, page_text)
 
-                # Extract KvK, HQ city/province, and office locations from legal/privacy pages
+                # Extract KvK, legal name, HQ city/province, and office locations from legal/privacy pages
                 if any(p in url.lower() for p in ["privacy", "terms", "policy"]):
                     if not agency.kvk_number:
                         agency.kvk_number = self._extract_kvk(page_text)
+                    if not agency.legal_name:
+                        agency.legal_name = self._extract_legal_name(page_text)
                     if not agency.hq_city or not agency.hq_province:
                         hq_city, hq_province = self._extract_hq_location(page_text)
                         if hq_city and not agency.hq_city:
@@ -163,14 +162,12 @@ class AdeccoScraper(BaseAgencyScraper):
         self.logger.info(f"Completed scrape of {self.AGENCY_NAME}")
         return agency
 
-    def _fetch_jobs_from_api(self, max_pages: int = 5) -> dict | None:
+    def _fetch_jobs_from_api(self) -> dict | None:
         """
-        Fetch jobs from Adecco's jobs API.
+        Fetch all jobs from Adecco's jobs API using pagination.
         
-        Parameters
-        ----------
-        max_pages : int
-            Maximum number of pages to fetch (10 jobs per page)
+        Uses the API's pagination response (nextRange, pageCount, total) to 
+        loop through all pages and collect all jobs.
         
         Returns
         -------
@@ -191,13 +188,16 @@ class AdeccoScraper(BaseAgencyScraper):
         all_jobs = []
         facets = None
         facet_counts = None
-        pagination = None
+        first_pagination = None
         
-        for page in range(max_pages):
-            start_range = page * 10
-            
+        # Start with first page
+        start_range = 0
+        page_count = 1
+        total_pages = None
+        
+        while True:
             payload = {
-                "queryString": f"&sort=PostedDate desc&facet.pivot=IsRemote&facet.range=Salary_Facet_Yearly&f.Salary_Facet_Yearly.facet.range.start=0&f.Salary_Facet_Yearly.facet.range.end=10000&f.Salary_Facet_Yearly.facet.range.gap=500&facet.range=Salary_Facet_Hourly&f.Salary_Facet_Hourly.facet.range.start=0&f.Salary_Facet_Hourly.facet.range.end=850&f.Salary_Facet_Hourly.facet.range.gap=5",
+                "queryString": "&sort=PostedDate desc&facet.pivot=IsRemote&facet.range=Salary_Facet_Yearly&f.Salary_Facet_Yearly.facet.range.start=0&f.Salary_Facet_Yearly.facet.range.end=10000&f.Salary_Facet_Yearly.facet.range.gap=500&facet.range=Salary_Facet_Hourly&f.Salary_Facet_Hourly.facet.range.start=0&f.Salary_Facet_Hourly.facet.range.end=850&f.Salary_Facet_Hourly.facet.range.gap=5",
                 "filtersToDisplay": "{8BF19AA8-37FC-456F-BB62-008D9F29A7F0}|{0E9E3971-6254-4C02-B78A-28CEA4125D68}|{AFB09656-1795-4BF0-9741-3C7A5AF43305}|{02142C96-D774-4896-8737-82652A468092}|{F01A2A00-7D3C-46AD-8CE4-244CDE95F25F}",
                 "range": 10,
                 "startRange": start_range,
@@ -218,23 +218,34 @@ class AdeccoScraper(BaseAgencyScraper):
                 data = response.json()
                 
                 jobs = data.get("jobs", [])
+                pagination = data.get("pagination", {})
+                
                 all_jobs.extend(jobs)
                 
-                # Get facets from first page (they're the same across pages)
-                if page == 0:
+                # Get facets and pagination info from first page
+                if page_count == 1:
                     facets = data.get("facets")
                     facet_counts = data.get("facet_counts")
-                    pagination = data.get("pagination")
+                    first_pagination = pagination
+                    total_pages = pagination.get("pageCount", 1)
+                    total_jobs = pagination.get("total", 0)
+                    self.logger.info(f"API has {total_jobs} total jobs across {total_pages} pages")
                 
-                self.logger.info(f"Fetched page {page + 1}: {len(jobs)} jobs (total: {len(all_jobs)})")
+                self.logger.info(f"Fetched page {page_count}/{total_pages}: {len(jobs)} jobs (collected: {len(all_jobs)})")
                 
-                # Check if we've fetched all jobs
-                total_jobs = pagination.get("total", 0) if pagination else 0
-                if len(all_jobs) >= total_jobs or len(jobs) == 0:
+                # Check if we should continue
+                next_range = pagination.get("nextRange")
+                
+                # Stop if: no nextRange, no jobs returned, or we've fetched all
+                if next_range is None or len(jobs) == 0 or page_count >= total_pages:
                     break
+                
+                # Move to next page
+                start_range = next_range
+                page_count += 1
                     
             except Exception as e:
-                self.logger.warning(f"Error fetching jobs page {page + 1}: {e}")
+                self.logger.warning(f"Error fetching jobs page {page_count}: {e}")
                 break
         
         if all_jobs:
@@ -243,7 +254,7 @@ class AdeccoScraper(BaseAgencyScraper):
                 "jobs": all_jobs,
                 "facets": facets,
                 "facet_counts": facet_counts,
-                "pagination": pagination,
+                "pagination": first_pagination,
                 "total_fetched": len(all_jobs)
             }
         
@@ -358,7 +369,7 @@ class AdeccoScraper(BaseAgencyScraper):
             agency.services.werving_selectie = True
             self.logger.info(f"Found {perm_count} permanent (werving & selectie) jobs")
         
-        # Store job statistics in notes
+        # Store job statistics in notes (informational only)
         total_jobs = pagination.get("total", len(jobs)) if pagination else len(jobs)
         if total_jobs:
             stats_note = f"API shows {total_jobs} active jobs ({temp_count} temp, {perm_count} perm)"
@@ -366,176 +377,13 @@ class AdeccoScraper(BaseAgencyScraper):
                 agency.notes += f"; {stats_note}"
             else:
                 agency.notes = stats_note
-            agency.annual_placements_estimate = total_jobs  # Use as rough estimate
         
-        # Extract role levels from jobs (exeprienceLevel field - note API typo)
-        role_levels_from_api = set()
-        
-        # Map API experience levels to standardized role levels
-        experience_level_map = {
-            # English variants
-            "student": "student",
-            "starter": "starter",
-            "junior": "starter",
-            "entry": "starter",
-            "entry level": "starter",
-            "medior": "medior",
-            "mid-level": "medior",
-            "intermediate": "medior",
-            "senior": "senior",
-            "experienced": "senior",
-            "lead": "senior",
-            "manager": "senior",
-            # Dutch variants
-            "beginnend": "starter",
-            "ervaren": "senior",
-            "leidinggevend": "senior",
-        }
-        
-        for job in jobs:
-            exp_level = job.get("exeprienceLevel")  # Note: API has typo
-            if exp_level:
-                exp_lower = exp_level.lower().strip()
-                if exp_lower in experience_level_map:
-                    role_levels_from_api.add(experience_level_map[exp_lower])
-                else:
-                    # Log unknown experience levels for debugging
-                    self.logger.debug(f"Unknown experience level: {exp_level}")
-        
-        # Also check educationLevelTitle for hints about role levels
-        education_levels = set()
-        for job in jobs:
-            edu_level = job.get("educationLevelTitle")
-            if edu_level:
-                education_levels.add(edu_level)
-        
-        # Education level hints for role levels
-        if "VMBO" in education_levels or "MBO" in education_levels:
-            role_levels_from_api.add("starter")
-        if "HBO" in education_levels:
-            role_levels_from_api.add("medior")
-        if "WO" in education_levels:
-            role_levels_from_api.add("senior")
-        
-        # Merge with existing role levels
-        if role_levels_from_api:
-            if agency.role_levels is None:
-                agency.role_levels = []
-            existing_levels = set(agency.role_levels)
-            for level in role_levels_from_api:
-                if level not in existing_levels:
-                    agency.role_levels.append(level)
-                    existing_levels.add(level)
-            self.logger.info(f"Found role levels from API: {list(role_levels_from_api)}")
-        
-        # Extract hourly rates from jobs (only PERHOUR salary scale)
-        hourly_rates = []
-        for job in jobs:
-            if job.get("salaryTimeScaleID") == "PERHOUR":
-                min_sal = job.get("minsalary")
-                max_sal = job.get("maxsalary")
-                if min_sal and min_sal > 0:
-                    hourly_rates.append(min_sal)
-                if max_sal and max_sal > 0:
-                    hourly_rates.append(max_sal)
-        
-        if hourly_rates:
-            agency.avg_hourly_rate_low = min(hourly_rates)
-            agency.avg_hourly_rate_high = max(hourly_rates)
-            self.logger.info(f"Found hourly rates: €{agency.avg_hourly_rate_low:.2f} - €{agency.avg_hourly_rate_high:.2f}")
-        
-        # Extract min hours per week from jobs (exclude 0)
-        min_hours_list = [job.get("workMinHours") for job in jobs if job.get("workMinHours") and job.get("workMinHours") > 0]
-        if min_hours_list:
-            agency.min_hours_per_week = min(min_hours_list)
-            self.logger.info(f"Found min hours per week: {agency.min_hours_per_week}")
-        
-        # Extract shift types from job titles
-        shift_types = set()
-        shift_keywords = {
-            "dagdienst": ["dagdienst", "dag dienst"],
-            "avonddienst": ["avonddienst", "avond dienst"],
-            "nachtdienst": ["nachtdienst", "nacht dienst"],
-            "weekend": ["weekend", "weekenddienst"],
-            "ploegendienst": ["ploegendienst", "2 ploegen", "3 ploegen", "volcontinudienst"],
-        }
-        
-        for job in jobs:
-            title = (job.get("jobTitle") or "").lower()
-            for shift_type, keywords in shift_keywords.items():
-                if any(kw in title for kw in keywords):
-                    shift_types.add(shift_type)
-        
-        if shift_types:
-            if agency.shift_types_supported is None:
-                agency.shift_types_supported = []
-            existing_shifts = set(agency.shift_types_supported)
-            for shift in shift_types:
-                if shift not in existing_shifts:
-                    agency.shift_types_supported.append(shift)
-            self.logger.info(f"Found shift types from job titles: {list(shift_types)}")
-        
-        # Extract more cities from facet_counts.facet_pivot.cityName
-        facet_counts = jobs_data.get("facet_counts", {})
-        if facet_counts:
-            city_facets = facet_counts.get("facet_pivot", {}).get("cityName", [])
-            if city_facets:
-                existing_cities = {loc.city.lower() for loc in (agency.office_locations or [])}
-                new_cities_count = 0
-                
-                for city_facet in city_facets:
-                    city_name = city_facet.get("value", "")
-                    job_count = city_facet.get("count", 0)
-                    
-                    if city_name and job_count >= 3:  # Only add cities with 3+ jobs
-                        city_normalized = city_name.title()
-                        if city_normalized.lower() not in existing_cities:
-                            province = get_province_for_city(city_normalized)
-                            if agency.office_locations is None:
-                                agency.office_locations = []
-                            agency.office_locations.append(OfficeLocation(city=city_normalized, province=province))
-                            existing_cities.add(city_normalized.lower())
-                            new_cities_count += 1
-                
-                if new_cities_count > 0:
-                    self.logger.info(f"Added {new_cities_count} more cities from facets")
-            
-            # Get more accurate contract type counts from facets
-            contract_facets = facet_counts.get("facet_pivot", {}).get("contractTypeTitle_Facet", [])
-            for facet in contract_facets:
-                val = facet.get("value", "")
-                count = facet.get("count", 0)
-                if "TEMP" in val:
-                    temp_count = count
-                elif "PERM" in val:
-                    perm_count = count
-            
-            # Update notes with more accurate counts
-            if contract_facets:
-                agency.notes = f"API shows {total_jobs} active jobs ({temp_count} temp, {perm_count} perm)"
-            
-            # Extract role levels from educationLevel_Facet (more comprehensive)
-            edu_facets = facet_counts.get("facet_pivot", {}).get("educationLevel_Facet", [])
-            for facet in edu_facets:
-                val = facet.get("value", "")
-                count = facet.get("count", 0)
-                if count > 0:
-                    if "VMBO" in val or "MBO" in val:
-                        if "starter" not in (agency.role_levels or []):
-                            if agency.role_levels is None:
-                                agency.role_levels = []
-                            agency.role_levels.append("starter")
-                    elif "HBO" in val or "BACHELORDEGREE" in val:
-                        if "medior" not in (agency.role_levels or []):
-                            if agency.role_levels is None:
-                                agency.role_levels = []
-                            agency.role_levels.append("medior")
-                    elif "WO" in val or "MASTERDEGREE" in val:
-                        if "senior" not in (agency.role_levels or []):
-                            if agency.role_levels is None:
-                                agency.role_levels = []
-                            agency.role_levels.append("senior")
-                            self.logger.info(f"Found senior role level from facets (WO jobs: {count})")
+        # Note: We don't extract the following from API as they're job-specific, not agency policies:
+        # - avg_hourly_rate: API salary is worker wages, not agency rates
+        # - annual_placements_estimate: Active jobs ≠ annual placements
+        # - min_hours_per_week: Job-specific workMinHours, not agency minimum
+        # - role_levels: exeprienceLevel is usually null, educationLevel ≠ role level
+        # - shift_types_supported: Unreliable to parse from job titles
 
     def _extract_towns_from_homepage(self, soup: BeautifulSoup) -> list[OfficeLocation]:
         """
@@ -594,41 +442,18 @@ class AdeccoScraper(BaseAgencyScraper):
         return sectors
 
     def _extract_logo(self, soup: BeautifulSoup, url: str = "") -> str | None:
-        """Extract logo URL from Adecco's website."""
-        # Try header images first - Adecco has logo in header
-        header = soup.find("header")
-        if header:
-            img = header.find("img")
-            if img and img.get("src"):
-                src = img.get("src")
-                # Check if it's an actual logo (contains 'logo' in path or is from CDN)
-                if "logo" in src.lower() or "cdn.adecco" in src.lower():
-                    self.logger.info(f"Found logo via header img: {src[:60]}...")
-                    return self._make_absolute_url(src, url)
-
-        # Try logo class selectors
-        logo_selectors = [
-            ".header-desktop__logo img",
-            "[class*='logo'] img",
-            "img[class*='logo']",
-            "a.logo img",
-            ".logo img",
-        ]
-        for selector in logo_selectors:
-            logo = soup.select_one(selector)
-            if logo and logo.get("src"):
-                src = logo.get("src")
-                self.logger.info(f"Found logo via selector '{selector}': {src[:60]}...")
-                return self._make_absolute_url(src, url)
-
-        # Try OG image as fallback (might not be logo)
-        og_image = soup.find("meta", attrs={"property": "og:image"})
-        if og_image and og_image.get("content"):
-            logo_url = og_image.get("content")
-            if logo_url:  # Only use if it looks like a logo
-                self.logger.info(f"Found logo via og:image: {logo_url[:60]}...")
-                return logo_url
-
+        """
+        Extract logo URL from Adecco's website.
+        
+        Source: https://www.adecco-jobs.com/amazon/nl-nl/privacy-policy/
+        Element: <div class="header-desktop__area-logo"><a class="header-desktop__logo"><img src="...">
+        """
+        logo = soup.select_one(".header-desktop__area-logo img")
+        if logo and logo.get("src"):
+            src = logo.get("src")
+            self.logger.info(f"Found logo: {src[:60]}...")
+            return src if src.startswith("http") else self._make_absolute_url(src, url)
+        
         return None
 
     def _extract_phone(self, soup: BeautifulSoup, text: str) -> str | None:
@@ -701,6 +526,30 @@ class AdeccoScraper(BaseAgencyScraper):
                 self.logger.info(f"Found KvK: {kvk}")
                 return kvk
 
+        return None
+
+    def _extract_legal_name(self, text: str) -> str | None:
+        """
+        Extract legal name from privacy policy page.
+        
+        Pattern from Adecco's privacy policy:
+        "Adecco Nederland, Hogeweg 123, 5301 LL Zaltbommel, handelend onder Adecco Group Nederland 
+        (Adecco Holding Nederland B.V. met KvK: 16033314)"
+        """
+        # Pattern: (Company Name B.V. met KvK: 12345678)
+        patterns = [
+            r"\(([^)]+B\.V\.)\s+met\s+KvK",  # Dutch pattern
+            r"\(([^)]+B\.V\.)\s+with\s+KvK",  # English pattern
+            r"handelend onder.*?\(([^)]+B\.V\.)",  # "operating under" pattern
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                legal_name = match.group(1).strip()
+                self.logger.info(f"Found legal name: {legal_name}")
+                return legal_name
+        
         return None
 
     def _extract_sectors(self, text: str) -> list[str]:
