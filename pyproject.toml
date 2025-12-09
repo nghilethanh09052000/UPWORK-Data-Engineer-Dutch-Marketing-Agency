@@ -23,6 +23,7 @@ dependencies = [
   "aiohttp>=3.12.12",
   "aiodns>=3.4.0",
   "truststore>=0.10.1",
+  "pdfplumber>=0.11.0",
 ]
 
 [project.optional-dependencies]

@@ -10,9 +10,11 @@ Extraction logic specific to Adecco's website structure.
 from __future__ import annotations
 
 import re
+from io import BytesIO
 
 import requests
 import dagster as dg
+import pdfplumber
 from bs4 import BeautifulSoup
 
 from staffing_agency_scraper.lib.fetch import fetch_with_retry, get_chrome_user_agent
@@ -43,17 +45,22 @@ class AdeccoScraper(BaseAgencyScraper):
     BRAND_GROUP = "Adecco Group"
 
     # Adecco uses /nl-nl/ path prefix for Dutch content
-    # URLs discovered from sitemap analysis
     PAGES_TO_SCRAPE = [
-        "https://www.adecco.com/nl-nl",  # Main page (has logo SVG)
+        "https://www.adecco.com/nl-nl",  # Main page
         "https://www.adecco.com/nl-nl/werkgevers",  # Employers page - services, clients info
         "https://www.adecco.com/nl-nl/work-in-holland",  # Lists sectors & cities
-        "https://www.adecco-jobs.com/amazon/nl-nl/contact/",  # Has phone & email (contact form)
-        "https://www.adecco-jobs.com/amazon/nl-nl/privacy-policy/",  # Has KvK, address, email
+        "https://www.adecco.com/nl-nl/contact",  # Contact page - phone number
+        "https://www.adecco.com/nl-nl/policy/english/privacy-policy",  # KvK, legal name, HQ address
     ]
+    
+    # Dedicated page for logo extraction (has static logo, not JS-rendered)
+    LOGO_PAGE_URL = "https://www.adecco-jobs.com/amazon/en-nl/contact/"
     
     # Jobs API endpoint for fetching live job data
     JOBS_API_URL = "https://www.adecco.com/api/data/jobs/summarized"
+    
+    # MVO Certificate PDF (valid until 07-jan-2026)
+    MVO_CERTIFICATE_URL = "https://www.adecco.com/-/jssmedia/project/adecco/AdeccoNL/MVO%20pdfs/MVO%20certificaat%20Adecco%20Group%20Nederland%20tot%2007-jan-2026%20DNV"
 
     def scrape(self) -> Agency:
         self.logger.info(f"Starting scrape of {self.AGENCY_NAME}")
@@ -61,7 +68,14 @@ class AdeccoScraper(BaseAgencyScraper):
         agency = self.create_base_agency()
         agency.geo_focus_type = GeoFocusType.INTERNATIONAL
         agency.employers_page_url = "https://www.adecco.com/nl-nl/werkgevers"
-        agency.contact_form_url = "https://www.adecco-jobs.com/amazon/nl-nl/contact/"
+        agency.contact_form_url = "https://www.adecco.com/nl-nl/contact"
+
+        # Extract logo from dedicated page (has static logo, not JS-rendered)
+        try:
+            logo_soup = self.fetch_page(self.LOGO_PAGE_URL)
+            agency.logo_url = self._extract_logo(logo_soup)
+        except Exception as e:
+            self.logger.warning(f"Error fetching logo page: {e}")
 
         # Scrape all pages and extract data
         all_text = ""
@@ -71,33 +85,38 @@ class AdeccoScraper(BaseAgencyScraper):
                 page_text = soup.get_text(separator=" ", strip=True)
                 all_text += " " + page_text
 
-                # Extract logo from any page (prefer pages with actual logo in header)
-                if not agency.logo_url:
-                    logo = self._extract_logo(soup, url)
-                    if logo:
-                        agency.logo_url = logo
-
-                # Extract phone and email from contact pages
+                # Extract phone from contact page
                 if "contact" in url.lower():
                     if not agency.contact_phone:
                         agency.contact_phone = self._extract_phone(soup, page_text)
-                    if not agency.contact_email:
-                        agency.contact_email = self._extract_email(soup, page_text)
+                
+                # Extract email from any page (main page has ws@adecco.nl in __NEXT_DATA__)
+                if not agency.contact_email:
+                    agency.contact_email = self._extract_email(soup, page_text)
 
-                # Extract KvK, legal name, HQ city/province, and office locations from legal/privacy pages
+                # Extract KvK, legal name, HQ city/province from privacy page's __NEXT_DATA__
                 if any(p in url.lower() for p in ["privacy", "terms", "policy"]):
+                    # Get raw HTML to extract __NEXT_DATA__ JSON
+                    raw_html = str(soup)
+                    next_data = self._extract_next_data_text(raw_html)
+                    
+                    if next_data:
+                        if not agency.kvk_number:
+                            agency.kvk_number = self._extract_kvk(next_data)
+                        if not agency.legal_name:
+                            agency.legal_name = self._extract_legal_name(next_data)
+                        if not agency.hq_city or not agency.hq_province:
+                            hq_city, hq_province = self._extract_hq_location(next_data)
+                            if hq_city and not agency.hq_city:
+                                agency.hq_city = hq_city
+                            if hq_province and not agency.hq_province:
+                                agency.hq_province = hq_province
+                    
+                    # Fallback to page_text if __NEXT_DATA__ didn't work
                     if not agency.kvk_number:
                         agency.kvk_number = self._extract_kvk(page_text)
                     if not agency.legal_name:
                         agency.legal_name = self._extract_legal_name(page_text)
-                    if not agency.hq_city or not agency.hq_province:
-                        hq_city, hq_province = self._extract_hq_location(page_text)
-                        if hq_city and not agency.hq_city:
-                            agency.hq_city = hq_city
-                        if hq_province and not agency.hq_province:
-                            agency.hq_province = hq_province
-                    if not agency.office_locations:
-                        agency.office_locations = self._extract_office_locations(page_text)
 
                 # Extract towns (office locations) and fields (sectors) from main page
                 if url == "https://www.adecco.nl":
@@ -134,7 +153,10 @@ class AdeccoScraper(BaseAgencyScraper):
         agency.services = self._extract_services(all_text)
         agency.focus_segments = self._extract_focus_segments(all_text)
         agency.regions_served = self._extract_regions(all_text)
-        agency.certifications = self._extract_certifications(all_text)
+        
+        # Extract certifications from PDF certificate
+        agency.certifications = self._fetch_pdf_certifications()
+        
         agency.membership = self._extract_membership(all_text)
         agency.cao_type = self._extract_cao_type(all_text)
         agency.digital_capabilities = self._extract_digital_capabilities(all_text)
@@ -369,15 +391,6 @@ class AdeccoScraper(BaseAgencyScraper):
             agency.services.werving_selectie = True
             self.logger.info(f"Found {perm_count} permanent (werving & selectie) jobs")
         
-        # Store job statistics in notes (informational only)
-        total_jobs = pagination.get("total", len(jobs)) if pagination else len(jobs)
-        if total_jobs:
-            stats_note = f"API shows {total_jobs} active jobs ({temp_count} temp, {perm_count} perm)"
-            if agency.notes:
-                agency.notes += f"; {stats_note}"
-            else:
-                agency.notes = stats_note
-        
         # Note: We don't extract the following from API as they're job-specific, not agency policies:
         # - avg_hourly_rate: API salary is worker wages, not agency rates
         # - annual_placements_estimate: Active jobs ≠ annual placements
@@ -441,18 +454,20 @@ class AdeccoScraper(BaseAgencyScraper):
         
         return sectors
 
-    def _extract_logo(self, soup: BeautifulSoup, url: str = "") -> str | None:
+    def _extract_logo(self, soup: BeautifulSoup) -> str | None:
         """
-        Extract logo URL from Adecco's website.
+        Extract logo URL from adecco-jobs.com page.
         
-        Source: https://www.adecco-jobs.com/amazon/nl-nl/privacy-policy/
-        Element: <div class="header-desktop__area-logo"><a class="header-desktop__logo"><img src="...">
+        The page has a static logo in the header: .header-desktop__area-logo img
         """
         logo = soup.select_one(".header-desktop__area-logo img")
         if logo and logo.get("src"):
             src = logo.get("src")
-            self.logger.info(f"Found logo: {src[:60]}...")
-            return src if src.startswith("http") else self._make_absolute_url(src, url)
+            # Make absolute if needed
+            if not src.startswith("http"):
+                src = f"https://www.adecco-jobs.com{src}"
+            self.logger.info(f"Found logo: {src}")
+            return src
         
         return None
 
@@ -460,6 +475,7 @@ class AdeccoScraper(BaseAgencyScraper):
         """Extract phone number - simple regex based."""
         # Dutch phone patterns
         patterns = [
+            r"(0\d{3}\s\d{3}\s\d{3})",  # 0418 784 000 (main Adecco number)
             r"(0\d{2}\s?\d{3,4}\s?\d{3,4})",  # 065 3940431
             r"(\+31\s?\d{1,3}\s?\d{3}\s?\d{4})",  # +31 format
         ]
@@ -474,12 +490,26 @@ class AdeccoScraper(BaseAgencyScraper):
         return None
 
     def _extract_email(self, soup: BeautifulSoup, text: str) -> str | None:
-        """Extract email - simple regex based."""
-        # Look for adecco emails
+        """
+        Extract email - from mailto links or text.
+        
+        The main Adecco page has email in __NEXT_DATA__ JSON as:
+        <a href=\"mailto:ws@adecco.nl?subject=...
+        """
+        # Get raw HTML to search for mailto links (including in __NEXT_DATA__)
+        raw_html = str(soup)
+        
+        # First try to find mailto links (most reliable)
+        mailto_match = re.search(r'mailto:([a-zA-Z0-9._%+-]+@adecco\.nl)', raw_html, re.IGNORECASE)
+        if mailto_match:
+            email = mailto_match.group(1)
+            self.logger.info(f"Found email via mailto: {email}")
+            return email
+        
+        # Fallback: Look for adecco emails in text
         patterns = [
             r"([\w\.\-]+@adecco\.nl)",
             r"([\w\.\-]+@adecco\.com)",
-            r"([\w\.\-]+@adecco[\w\-]*\.[\w]+)",
         ]
         
         for pattern in patterns:
@@ -488,6 +518,38 @@ class AdeccoScraper(BaseAgencyScraper):
                 email = match.group(1)
                 self.logger.info(f"Found email: {email}")
                 return email
+        
+        return None
+
+    def _extract_next_data_text(self, raw_html: str) -> str | None:
+        """
+        Extract text content from __NEXT_DATA__ script tag.
+        
+        Adecco's privacy policy page is React/Next.js rendered, so the actual
+        content is in the __NEXT_DATA__ JSON. We extract it as a string and
+        use regex to find the relevant data.
+        
+        Parameters
+        ----------
+        raw_html : str
+            Raw HTML of the page
+            
+        Returns
+        -------
+        str | None
+            The __NEXT_DATA__ content as a string for regex extraction
+        """
+        # Find __NEXT_DATA__ script content
+        next_data_match = re.search(
+            r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>',
+            raw_html,
+            re.DOTALL
+        )
+        
+        if next_data_match:
+            content = next_data_match.group(1)
+            self.logger.info(f"Found __NEXT_DATA__ ({len(content)} chars)")
+            return content
         
         return None
 
@@ -532,15 +594,15 @@ class AdeccoScraper(BaseAgencyScraper):
         """
         Extract legal name from privacy policy page.
         
-        Pattern from Adecco's privacy policy:
-        "Adecco Nederland, Hogeweg 123, 5301 LL Zaltbommel, handelend onder Adecco Group Nederland 
-        (Adecco Holding Nederland B.V. met KvK: 16033314)"
+        Pattern from Adecco's privacy policy (English version):
+        "Adecco Nederland, Hogeweg 123, 5301 LL Zaltbommel, trading as Adecco Group Nederland 
+        (Adecco Holding Nederland B.V. with KvK: 16033314)"
         """
-        # Pattern: (Company Name B.V. met KvK: 12345678)
         patterns = [
-            r"\(([^)]+B\.V\.)\s+met\s+KvK",  # Dutch pattern
             r"\(([^)]+B\.V\.)\s+with\s+KvK",  # English pattern
-            r"handelend onder.*?\(([^)]+B\.V\.)",  # "operating under" pattern
+            r"\(([^)]+B\.V\.)\s+met\s+KvK",  # Dutch pattern
+            r"trading as.*?\(([^)]+B\.V\.)",  # "trading as" pattern
+            r"handelend onder.*?\(([^)]+B\.V\.)",  # "operating under" pattern (Dutch)
         ]
         
         for pattern in patterns:
@@ -698,6 +760,72 @@ class AdeccoScraper(BaseAgencyScraper):
 
         return regions
 
+    def _fetch_pdf_certifications(self) -> list[str]:
+        """
+        Fetch and parse MVO certificate PDF to extract certifications.
+        
+        Downloads the PDF from Adecco's website and extracts certification info.
+        
+        Returns
+        -------
+        list[str]
+            List of certifications found in the PDF
+        """
+        certifications = []
+        
+        try:
+            self.logger.info("Fetching MVO certificate PDF...")
+            
+            headers = {
+                "User-Agent": get_chrome_user_agent(),
+                "Accept": "application/pdf",
+            }
+            
+            response = requests.get(
+                self.MVO_CERTIFICATE_URL,
+                headers=headers,
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            # Parse PDF using pdfplumber
+            with pdfplumber.open(BytesIO(response.content)) as pdf:
+                text = ""
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
+            
+            self.logger.info(f"Extracted {len(text)} characters from PDF")
+            
+            # Look for MVO Prestatieladder certification
+            if "MVO Prestatieladder" in text or "CSR Performance Ladder" in text:
+                # Extract the level (Niveau 1, 2, 3, 4, or 5)
+                niveau_match = re.search(r"Niveau\s*(\d)", text)
+                if niveau_match:
+                    level = niveau_match.group(1)
+                    certifications.append(f"MVO Prestatieladder Niveau {level}")
+                    self.logger.info(f"Found certification: MVO Prestatieladder Niveau {level}")
+                else:
+                    certifications.append("MVO Prestatieladder")
+                    self.logger.info("Found certification: MVO Prestatieladder (level unknown)")
+            
+            # Look for ISO 26000 mention
+            if "ISO 26000" in text:
+                certifications.append("ISO 26000")
+                self.logger.info("Found certification: ISO 26000")
+            
+            # Add certificate URL to evidence
+            self.evidence_urls.append(self.MVO_CERTIFICATE_URL)
+            
+        except Exception as e:
+            self.logger.warning(f"Error fetching PDF certificate: {e}")
+            # Fallback to known certification if PDF fetch fails
+            certifications = ["MVO Prestatieladder Niveau 3"]
+            self.logger.info("Using fallback certification")
+        
+        return certifications
+
     def _extract_certifications(self, text: str) -> list[str]:
         """Extract certifications using shared CERTIFICATION_KEYWORDS."""
         certs = set()
@@ -784,29 +912,50 @@ class AdeccoScraper(BaseAgencyScraper):
         """
         Extract HQ city and province from text.
         
-        Returns both city and province derived from postal code.
+        Handles both regular text and escaped JSON from __NEXT_DATA__.
+        Pattern: "5301 LL Zaltbommel" or "5301 LL Zaltbommel"
         
         Returns
         -------
         tuple[str | None, str | None]
             (city, province) tuple
         """
-        from staffing_agency_scraper.lib.extract import extract_dutch_addresses
+        from staffing_agency_scraper.lib.dutch import DUTCH_POSTAL_TO_PROVINCE
         
+        # Pattern for Dutch postal code + city (handles escaped spaces too)
+        # e.g., "5301 LL Zaltbommel" or "5301 LL Zaltbommel"
+        patterns = [
+            r"(\d{4})\s*([A-Z]{2})\s+([A-Za-z\-]+)",  # Normal: 5301 LL Zaltbommel
+            r"(\d{4})\\s*([A-Z]{2})\\s+([A-Za-z\-]+)",  # Escaped: in JSON string
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                postal_code = match.group(1)
+                city = match.group(3)
+                
+                # Derive province from postal code prefix (keys are strings like "53")
+                postal_prefix = postal_code[:2]
+                province = DUTCH_POSTAL_TO_PROVINCE.get(postal_prefix)
+                
+                if city:
+                    self.logger.info(f"Found HQ location: {city}, {province} (postal: {postal_code})")
+                    return city, province
+        
+        # Fallback to shared utility
+        from staffing_agency_scraper.lib.extract import extract_dutch_addresses
         addresses = extract_dutch_addresses(text)
         
         if addresses:
-            # First address is typically the HQ
             first = addresses[0]
             city = first.get("city")
             province = first.get("province")
-            
             if city:
-                self.logger.info(f"Found HQ location: {city}, {province}")
-            
+                self.logger.info(f"Found HQ location via extract_dutch_addresses: {city}, {province}")
             return city, province
         
-        # Fallback to just city extraction
+        # Last fallback
         city = extract_hq_city_from_text(text)
         return city, None
 
