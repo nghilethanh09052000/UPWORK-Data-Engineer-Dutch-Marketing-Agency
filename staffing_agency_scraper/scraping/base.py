@@ -297,46 +297,69 @@ class BaseAgencyScraper(ABC):
                 # Update agency with found contact info (don't overwrite existing)
                 if not agency.kvk_number and contact_info.get("kvk_number"):
                     agency.kvk_number = contact_info["kvk_number"]
-                    self.logger.info(f"Found KvK: {agency.kvk_number}")
+                    self.logger.info(f"✓ Found KvK: {agency.kvk_number} | Source: {url}")
                 
                 if not agency.contact_phone and contact_info.get("contact_phone"):
                     agency.contact_phone = contact_info["contact_phone"]
-                    self.logger.info(f"Found phone: {agency.contact_phone}")
+                    self.logger.info(f"✓ Found phone: {agency.contact_phone} | Source: {url}")
                 
                 if not agency.contact_email and contact_info.get("contact_email"):
                     agency.contact_email = contact_info["contact_email"]
-                    self.logger.info(f"Found email: {agency.contact_email}")
+                    self.logger.info(f"✓ Found email: {agency.contact_email} | Source: {url}")
                 
                 if not agency.hq_city and contact_info.get("hq_city"):
                     agency.hq_city = contact_info["hq_city"]
+                    self.logger.info(f"✓ Found HQ city: {agency.hq_city} | Source: {url}")
                 
                 if not agency.hq_province and contact_info.get("hq_province"):
                     agency.hq_province = contact_info["hq_province"]
+                    self.logger.info(f"✓ Found HQ province: {agency.hq_province} | Source: {url}")
+                
+                if not agency.legal_name and contact_info.get("legal_name"):
+                    agency.legal_name = contact_info["legal_name"]
+                    self.logger.info(f"✓ Found legal name: {agency.legal_name} | Source: {url}")
                 
                 # Extract logo from each page (use first found)
                 if not agency.logo_url:
                     logo = self.extract_logo_url(soup)
                     if logo:
                         agency.logo_url = logo
-                        self.logger.info(f"Found logo: {agency.logo_url}")
+                        self.logger.info(f"✓ Found logo: {agency.logo_url} | Source: {url}")
                 
                 # Collect certifications and sectors
                 certs = self.extract_certifications_from_page(soup)
+                if certs:
+                    self.logger.info(f"✓ Found {len(certs)} certifications | Source: {url}")
                 all_certifications.extend(certs)
                 
                 sectors = self.extract_sectors_from_page(soup)
+                if sectors:
+                    self.logger.info(f"✓ Found {len(sectors)} sectors | Source: {url}")
                 all_sectors.extend(sectors)
                 
             except Exception as e:
-                self.logger.warning(f"Error scraping {url}: {e}")
+                self.logger.warning(f"✗ Error scraping {url}: {e}")
         
         # Dedupe and set certifications
         if all_certifications:
             agency.certifications = list(set(all_certifications))
+            self.logger.info(f"Total certifications: {agency.certifications}")
         
         # Dedupe and set sectors
         if all_sectors:
             agency.sectors_core = list(set(all_sectors))[:10]  # Limit to top 10
+            self.logger.info(f"Total sectors: {agency.sectors_core}")
+        
+        # Log summary of what was found
+        self.logger.info(f"--- Extraction Summary for {self.AGENCY_NAME} ---")
+        self.logger.info(f"  KvK: {agency.kvk_number or 'NOT FOUND'}")
+        self.logger.info(f"  Phone: {agency.contact_phone or 'NOT FOUND'}")
+        self.logger.info(f"  Email: {agency.contact_email or 'NOT FOUND'}")
+        self.logger.info(f"  HQ City: {agency.hq_city or 'NOT FOUND'}")
+        self.logger.info(f"  Logo: {'YES' if agency.logo_url else 'NOT FOUND'}")
+        self.logger.info(f"  Sectors: {len(agency.sectors_core or [])} found")
+        self.logger.info(f"  Certifications: {len(agency.certifications or [])} found")
+        self.logger.info(f"  Pages scraped: {len(self.evidence_urls)}")
         
         # Update evidence URLs
         agency.evidence_urls = self.evidence_urls.copy()
