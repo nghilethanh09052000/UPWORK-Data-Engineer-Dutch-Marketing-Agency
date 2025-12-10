@@ -2,6 +2,7 @@
 Base scraper class for staffing agencies.
 
 Provides common functionality for all agency scrapers.
+Use AgencyScraperUtils for extraction methods.
 """
 
 from __future__ import annotations
@@ -55,6 +56,8 @@ class BaseAgencyScraper(ABC):
 
     Each agency scraper should inherit from this class and implement
     the required abstract methods.
+    
+    Use AgencyScraperUtils for reusable extraction methods.
     """
 
     # Agency configuration - override in subclass
@@ -67,7 +70,7 @@ class BaseAgencyScraper(ABC):
 
     def __init__(self):
         self.logger = dg.get_dagster_logger(f"{self.__class__.__name__}_scraper")
-        self.evidence_urls: list[str] = []
+        self.evidence_urls: list[str] = []  # List of URLs used as evidence
         self.collected_at = datetime.utcnow()
 
     @abstractmethod
@@ -101,7 +104,6 @@ class BaseAgencyScraper(ABC):
         if url not in self.evidence_urls:
             self.evidence_urls.append(url)
         return parse_html(response.text)
-
     def extract_contact_info(self, soup: BeautifulSoup) -> dict:
         """
         Extract contact information from a page using enhanced extraction.

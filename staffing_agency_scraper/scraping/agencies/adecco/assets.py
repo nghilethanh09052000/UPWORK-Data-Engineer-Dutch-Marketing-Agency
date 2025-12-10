@@ -35,6 +35,7 @@ from staffing_agency_scraper.lib.dutch import (
 )
 from staffing_agency_scraper.models import Agency, AgencyServices, DigitalCapabilities, GeoFocusType, OfficeLocation
 from staffing_agency_scraper.scraping.base import BaseAgencyScraper
+from staffing_agency_scraper.scraping.utils import AgencyScraperUtils
 
 
 class AdeccoScraper(BaseAgencyScraper):
@@ -62,8 +63,42 @@ class AdeccoScraper(BaseAgencyScraper):
     # MVO Certificate PDF (valid until 07-jan-2026)
     MVO_CERTIFICATE_URL = "https://www.adecco.com/-/jssmedia/project/adecco/AdeccoNL/MVO%20pdfs/MVO%20certificaat%20Adecco%20Group%20Nederland%20tot%2007-jan-2026%20DNV"
 
+    def _fetch_page_safe(self, url: str) -> BeautifulSoup | None:
+        """
+        Fetch page with fallback for Brotli errors.
+        Adecco's privacy page sometimes has Brotli decompression issues.
+        """
+        try:
+            return self.fetch_page(url)
+        except Exception as e:
+            error_msg = str(e)
+            if "brotli" in error_msg.lower() or "decode" in error_msg.lower():
+                self.logger.warning(f"Brotli error on {url}, trying with custom headers...")
+                try:
+                    # Fetch without accepting brotli encoding
+                    headers = {
+                        "User-Agent": get_chrome_user_agent(),
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        "Accept-Language": "nl-NL,nl;q=0.9,en-US;q=0.8,en;q=0.7",
+                        "Accept-Encoding": "gzip, deflate",  # No brotli
+                    }
+                    response = requests.get(url, headers=headers, timeout=30)
+                    response.raise_for_status()
+                    soup = parse_html(response.text)
+                    if url not in self.evidence_urls:
+                        self.evidence_urls.add(url)
+                    return soup
+                except Exception as e2:
+                    self.logger.warning(f"Fallback fetch failed for {url}: {e2}")
+                    return None
+            else:
+                raise
+
     def scrape(self) -> Agency:
         self.logger.info(f"Starting scrape of {self.AGENCY_NAME}")
+
+        # Initialize utils
+        self.utils = AgencyScraperUtils(logger=self.logger)
 
         agency = self.create_base_agency()
         agency.geo_focus_type = GeoFocusType.INTERNATIONAL
@@ -72,8 +107,11 @@ class AdeccoScraper(BaseAgencyScraper):
 
         # Extract logo from dedicated page (has static logo, not JS-rendered)
         try:
-            logo_soup = self.fetch_page(self.LOGO_PAGE_URL)
-            agency.logo_url = self._extract_logo(logo_soup)
+            logo_soup = self._fetch_page_safe(self.LOGO_PAGE_URL)
+            if logo_soup:
+                agency.logo_url = self.utils.fetch_logo(logo_soup, self.LOGO_PAGE_URL)
+                if not agency.logo_url:
+                    agency.logo_url = self._extract_logo(logo_soup)
         except Exception as e:
             self.logger.warning(f"Error fetching logo page: {e}")
 
@@ -81,9 +119,31 @@ class AdeccoScraper(BaseAgencyScraper):
         all_text = ""
         for url in self.PAGES_TO_SCRAPE:
             try:
-                soup = self.fetch_page(url)
+                soup = self._fetch_page_safe(url)
+                if not soup:
+                    continue
+                    
                 page_text = soup.get_text(separator=" ", strip=True)
                 all_text += " " + page_text
+
+                # Detect portals on every page
+                if self.utils.detect_candidate_portal(soup, page_text, url):
+                    agency.digital_capabilities.candidate_portal = True
+                if self.utils.detect_client_portal(soup, page_text, url):
+                    agency.digital_capabilities.client_portal = True
+                
+                # Extract role levels
+                role_levels = self.utils.fetch_role_levels(page_text, url)
+                if role_levels:
+                    if not agency.role_levels_offered:
+                        agency.role_levels_offered = []
+                    agency.role_levels_offered.extend(role_levels)
+                    agency.role_levels_offered = list(set(agency.role_levels_offered))
+                
+                # Extract review sources
+                review_sources = self.utils.fetch_review_sources(soup, url)
+                if review_sources and not agency.review_sources:
+                    agency.review_sources = review_sources
 
                 # Extract phone from contact page
                 if "contact" in url.lower():
@@ -96,27 +156,31 @@ class AdeccoScraper(BaseAgencyScraper):
 
                 # Extract KvK, legal name, HQ city/province from privacy page's __NEXT_DATA__
                 if any(p in url.lower() for p in ["privacy", "terms", "policy"]):
-                    # Get raw HTML to extract __NEXT_DATA__ JSON
-                    raw_html = str(soup)
-                    next_data = self._extract_next_data_text(raw_html)
-                    
-                    if next_data:
+                    try:
+                        # Get raw HTML to extract __NEXT_DATA__ JSON
+                        raw_html = str(soup)
+                        next_data = self._extract_next_data_text(raw_html)
+                        
+                        if next_data:
+                            if not agency.kvk_number:
+                                agency.kvk_number = self._extract_kvk(next_data)
+                            if not agency.legal_name:
+                                agency.legal_name = self._extract_legal_name(next_data)
+                            if not agency.hq_city or not agency.hq_province:
+                                hq_city, hq_province = self._extract_hq_location(next_data)
+                                if hq_city and not agency.hq_city:
+                                    agency.hq_city = hq_city
+                                if hq_province and not agency.hq_province:
+                                    agency.hq_province = hq_province
+                        
+                        # Fallback to page_text if __NEXT_DATA__ didn't work
                         if not agency.kvk_number:
-                            agency.kvk_number = self._extract_kvk(next_data)
+                            agency.kvk_number = self._extract_kvk(page_text)
                         if not agency.legal_name:
-                            agency.legal_name = self._extract_legal_name(next_data)
-                        if not agency.hq_city or not agency.hq_province:
-                            hq_city, hq_province = self._extract_hq_location(next_data)
-                            if hq_city and not agency.hq_city:
-                                agency.hq_city = hq_city
-                            if hq_province and not agency.hq_province:
-                                agency.hq_province = hq_province
-                    
-                    # Fallback to page_text if __NEXT_DATA__ didn't work
-                    if not agency.kvk_number:
-                        agency.kvk_number = self._extract_kvk(page_text)
-                    if not agency.legal_name:
-                        agency.legal_name = self._extract_legal_name(page_text)
+                            agency.legal_name = self._extract_legal_name(page_text)
+                    except Exception as e:
+                        self.logger.warning(f"Error extracting from privacy page: {e}")
+                        # Continue with other pages even if this fails
 
                 # Extract towns (office locations) and fields (sectors) from main page
                 if url == "https://www.adecco.nl":
@@ -143,6 +207,18 @@ class AdeccoScraper(BaseAgencyScraper):
 
         # Extract all data from accumulated text
         agency.sectors_core = self._extract_sectors(all_text)
+        
+        # Add normalized sectors
+        normalized_sectors = self.utils.fetch_sectors(all_text, "accumulated_text")
+        if normalized_sectors:
+            existing = set(agency.sectors_core or [])
+            for sector in normalized_sectors:
+                if sector not in existing:
+                    if agency.sectors_core is None:
+                        agency.sectors_core = []
+                    agency.sectors_core.append(sector)
+                    existing.add(sector)
+        
         # Merge homepage sectors if found
         if hasattr(self, '_homepage_sectors') and self._homepage_sectors:
             existing = set(agency.sectors_core or [])
@@ -159,7 +235,15 @@ class AdeccoScraper(BaseAgencyScraper):
         
         agency.membership = self._extract_membership(all_text)
         agency.cao_type = self._extract_cao_type(all_text)
-        agency.digital_capabilities = self._extract_digital_capabilities(all_text)
+        
+        # Extract digital capabilities (mobile app, API, feeds)
+        # Note: Portal detection was already done in the scrape loop above
+        digital_caps = self._extract_digital_capabilities(all_text)
+        agency.digital_capabilities.mobile_app = digital_caps.mobile_app
+        agency.digital_capabilities.api_available = digital_caps.api_available
+        agency.digital_capabilities.realtime_vacancy_feed = digital_caps.realtime_vacancy_feed
+        agency.digital_capabilities.realtime_availability_feed = digital_caps.realtime_availability_feed
+        agency.digital_capabilities.self_service_contracting = digital_caps.self_service_contracting
         
         # HQ city/province may have been extracted from privacy page; fallback to all_text
         if not agency.hq_city or not agency.hq_province:
@@ -868,28 +952,18 @@ class AdeccoScraper(BaseAgencyScraper):
 
     def _extract_digital_capabilities(self, text: str, soup: BeautifulSoup = None) -> DigitalCapabilities:
         """
-        Extract digital capabilities.
+        Extract digital capabilities (mobile app, API, feeds).
         
-        Be precise - only mark true if there's clear evidence of the capability.
+        Portal detection is handled in the main scrape() loop.
         """
         text_lower = text.lower()
-
-        # Check for actual portal mentions (not just generic text)
-        has_client_portal = any(w in text_lower for w in [
-            "werkgeversportaal", "client portal", "klantenportaal", "inloggen werkgever"
-        ])
         
-        # Adecco has "Mijn Adecco" for candidates
-        has_candidate_portal = any(w in text_lower for w in [
-            "mijn adecco", "mijn vacatures", "inloggen kandidaat", "mijn account"
-        ])
-        
-        # Check for app store links in HTML if soup provided
-        has_app = any(w in text_lower for w in ["app store", "google play", "download app"])
+        # Check for app store links
+        has_app = any(w in text_lower for w in ["app store", "google play", "download app", "adecco app"])
         
         return DigitalCapabilities(
-            client_portal=has_client_portal,
-            candidate_portal=has_candidate_portal,
+            client_portal=False,
+            candidate_portal=False,
             mobile_app=has_app,
             api_available=False,  # No evidence of public API
             realtime_vacancy_feed=False,  # Would need specific evidence

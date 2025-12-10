@@ -1,0 +1,67 @@
+# Dagster instance configuration
+# This file configures local logging for all Dagster runs
+
+# Run coordinator configuration
+run_coordinator:
+  module: dagster.core.run_coordinator
+  class: QueuedRunCoordinator
+
+# Run launcher configuration
+run_launcher:
+  module: dagster.core.launcher
+  class: DefaultRunLauncher
+
+# Compute logs configuration - writes logs to local files
+compute_logs:
+  module: dagster.core.storage.local_compute_log_manager
+  class: LocalComputeLogManager
+  config:
+    base_dir: ./logs/compute_logs
+
+# Event log storage
+event_log_storage:
+  module: dagster.core.storage.event_log
+  class: SqliteEventLogStorage
+  config:
+    base_dir: ./dagster_home/history
+
+# Run storage
+run_storage:
+  module: dagster.core.storage.runs
+  class: SqliteRunStorage
+  config:
+    base_dir: ./dagster_home/history
+
+# Schedule storage
+schedule_storage:
+  module: dagster.core.storage.schedules
+  class: SqliteScheduleStorage
+  config:
+    base_dir: ./dagster_home/schedules
+
+# Python logs configuration
+python_logs:
+  managed_python_loggers:
+    - staffing_agency_scraper
+  python_log_level: INFO
+  dagster_handler_config:
+    handlers:
+      console:
+        class: logging.StreamHandler
+        level: INFO
+        formatter: colored
+        stream: ext://sys.stdout
+      file:
+        class: logging.handlers.RotatingFileHandler
+        level: DEBUG
+        formatter: json
+        filename: ./logs/dagster.log
+        maxBytes: 10485760  # 10MB
+        backupCount: 5
+    formatters:
+      colored:
+        format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        datefmt: "%Y-%m-%d %H:%M:%S"
+      json:
+        format: '{"time": "%(asctime)s", "name": "%(name)s", "level": "%(levelname)s", "message": "%(message)s"}'
+
