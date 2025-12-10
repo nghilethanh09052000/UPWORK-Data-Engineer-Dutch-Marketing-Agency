@@ -135,10 +135,10 @@ class AdeccoScraper(BaseAgencyScraper):
                 # Extract role levels
                 role_levels = self.utils.fetch_role_levels(page_text, url)
                 if role_levels:
-                    if not agency.role_levels_offered:
-                        agency.role_levels_offered = []
-                    agency.role_levels_offered.extend(role_levels)
-                    agency.role_levels_offered = list(set(agency.role_levels_offered))
+                    if not agency.role_levels:
+                        agency.role_levels = []
+                    agency.role_levels.extend(role_levels)
+                    agency.role_levels = list(set(agency.role_levels))
                 
                 # Extract review sources
                 review_sources = self.utils.fetch_review_sources(soup, url)

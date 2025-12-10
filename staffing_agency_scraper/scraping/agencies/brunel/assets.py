@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 
 from staffing_agency_scraper.models import Agency, AgencyServices, AICapabilities, CaoType, DigitalCapabilities, GeoFocusType, OfficeLocation
 from staffing_agency_scraper.scraping.base import BaseAgencyScraper
+from staffing_agency_scraper.scraping.utils import AgencyScraperUtils
 
 
 class BrunelScraper(BaseAgencyScraper):
@@ -35,6 +36,9 @@ class BrunelScraper(BaseAgencyScraper):
     def scrape(self) -> Agency:
         self.logger.info(f"Starting scrape of {self.AGENCY_NAME}")
 
+        # Initialize utils for client improvements
+        self.utils = AgencyScraperUtils(logger=self.logger)
+
         agency = self.create_base_agency()
         agency.geo_focus_type = GeoFocusType.INTERNATIONAL
         agency.employers_page_url = f"{self.WEBSITE_URL}/voor-opdrachtgevers"
@@ -55,14 +59,27 @@ class BrunelScraper(BaseAgencyScraper):
                 if not has_chatbot:
                     has_chatbot = self._check_chatbot_in_next_data(soup, url)
 
-                # Extract logo from main page
+                # Extract logo from main page (use utils for PNG/SVG filtering and banner exclusion)
                 if url == self.WEBSITE_URL and not agency.logo_url:
-                    agency.logo_url = self._extract_logo(soup)
+                    logo = self.utils.fetch_logo(soup, url)
+                    if logo:
+                        agency.logo_url = logo
+                        self.logger.info(f"✓ Found logo (PNG/SVG, no banner): {logo}")
+                    else:
+                        # Fallback to custom method (but this might get banner images)
+                        logo = self._extract_logo(soup)
+                        if logo:
+                            self.logger.warning(f"⚠️ Using fallback logo (might be banner): {logo}")
+                            agency.logo_url = logo
 
-                # Extract sectors from homepage cards
+                # Extract sectors from homepage cards (also use normalized utils method)
                 if url == self.WEBSITE_URL:
                     sectors = self._extract_sectors_from_homepage(soup, url)
                     all_sectors.update(sectors)
+                    
+                    # Add normalized sectors from utils
+                    norm_sectors = self.utils.fetch_sectors(page_text, url)
+                    all_sectors.update(norm_sectors)
                     
                     # Also extract HQ from main page if mentioned
                     if "amsterdam" in page_text.lower():
@@ -154,13 +171,39 @@ class BrunelScraper(BaseAgencyScraper):
                         agency.hq_city = hq["city"]
                         agency.hq_province = hq.get("province")
                         # The HQ URL will be first in office_urls (Amsterdam)
+                
+                # Portal detection on every page
+                if self.utils.detect_candidate_portal(soup, page_text, url):
+                    agency.digital_capabilities.candidate_portal = True
+                if self.utils.detect_client_portal(soup, page_text, url):
+                    agency.digital_capabilities.client_portal = True
+                
+                # Extract role levels on every page
+                role_levels = self.utils.fetch_role_levels(page_text, url)
+                if role_levels:
+                    if not agency.role_levels:
+                        agency.role_levels = []
+                    agency.role_levels.extend(role_levels)
+                    agency.role_levels = list(set(agency.role_levels))
+                
+                # Extract review sources
+                review_sources = self.utils.fetch_review_sources(soup, url)
+                if review_sources and not agency.review_sources:
+                    agency.review_sources = review_sources
 
                 # Extract HQ info from privacy page
                 if "privacy" in url.lower():
                     kvk = self._extract_kvk(page_text)
+                    if not kvk:
+                        # Fallback to utils
+                        kvk = self.utils.fetch_kvk_number(page_text, url)
                     if kvk:
                         agency.kvk_number = kvk
+                    
                     legal_name = self._extract_legal_name(page_text)
+                    if not legal_name:
+                        # Fallback to utils
+                        legal_name = self.utils.fetch_legal_name(page_text, self.AGENCY_NAME, url)
                     if legal_name:
                         agency.legal_name = legal_name
                     

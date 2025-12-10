@@ -20,6 +20,7 @@ from staffing_agency_scraper.lib.fetch import get_chrome_user_agent, fetch_with_
 from staffing_agency_scraper.lib.dutch import DUTCH_POSTAL_TO_PROVINCE
 from staffing_agency_scraper.models import Agency, AgencyServices, CaoType, DigitalCapabilities, GeoFocusType, OfficeLocation
 from staffing_agency_scraper.scraping.base import BaseAgencyScraper
+from staffing_agency_scraper.scraping.utils import AgencyScraperUtils
 
 
 class ASATalentScraper(BaseAgencyScraper):
@@ -52,6 +53,9 @@ class ASATalentScraper(BaseAgencyScraper):
     def scrape(self) -> Agency:
         self.logger.info(f"Starting scrape of {self.AGENCY_NAME}")
 
+        # Initialize utils for client improvements
+        self.utils = AgencyScraperUtils(logger=self.logger)
+
         agency = self.create_base_agency()
         agency.geo_focus_type = GeoFocusType.NATIONAL
         agency.employers_page_url = f"{self.WEBSITE_URL}/werkgevers"
@@ -66,9 +70,14 @@ class ASATalentScraper(BaseAgencyScraper):
                 page_text = soup.get_text(separator=" ", strip=True)
                 all_text += " " + page_text
 
-                # Extract logo from main page
+                # Extract logo from main page (use utils for PNG/SVG filtering)
                 if url == self.WEBSITE_URL and not agency.logo_url:
-                    agency.logo_url = self._extract_logo(soup)
+                    logo = self.utils.fetch_logo(soup, url)
+                    if logo:
+                        agency.logo_url = logo
+                    else:
+                        # Fallback to custom method
+                        agency.logo_url = self._extract_logo(soup)
 
                 # Extract office locations from vestigingen page
                 if url == "https://asatalent.nl/vestigingen":
@@ -80,9 +89,23 @@ class ASATalentScraper(BaseAgencyScraper):
                 if "keurmerken" in url.lower():
                     agency.certifications = self._extract_certifications(page_text)
                 
-                # Extract legal name from disclaimer
-                if "disclaimer" in url.lower():
-                    agency.legal_name = self._extract_legal_name(page_text)
+                # Extract legal name and KvK from disclaimer/privacy/legal pages
+                if "disclaimer" in url.lower() or "privacy" in url.lower() or "legal" in url.lower():
+                    if not agency.legal_name:
+                        legal_name = self._extract_legal_name(page_text)
+                        if legal_name:
+                            agency.legal_name = legal_name
+                        else:
+                            # Fallback to utils
+                            legal_name = self.utils.fetch_legal_name(page_text, self.AGENCY_NAME, url)
+                            if legal_name:
+                                agency.legal_name = legal_name
+                    
+                    # Try to extract KvK using utils
+                    if not agency.kvk_number:
+                        kvk = self.utils.fetch_kvk_number(page_text, url)
+                        if kvk:
+                            agency.kvk_number = kvk
                 
                 # Extract contact email from kenniscentrum page
                 if "kenniscentrum" in url.lower():
@@ -90,15 +113,34 @@ class ASATalentScraper(BaseAgencyScraper):
                     if email and not agency.contact_email:
                         agency.contact_email = email
                 
-                # Extract sectors from expertises page
+                # Extract sectors from expertises page (use normalized utils method)
                 if "expertises" in url.lower():
-                    sectors = self._extract_sectors_from_expertises(soup, url)
+                    sectors = self.utils.fetch_sectors(page_text, url)
                     all_sectors.update(sectors)
                 
-                # Extract sectors from vakgebieden page
+                # Extract sectors from vakgebieden page (use normalized utils method)
                 if "vakgebieden" in url.lower():
-                    sectors = self._extract_sectors_from_vakgebieden(soup, url)
+                    sectors = self.utils.fetch_sectors(page_text, url)
                     all_sectors.update(sectors)
+                
+                # Portal detection on every page
+                if self.utils.detect_candidate_portal(soup, page_text, url):
+                    agency.digital_capabilities.candidate_portal = True
+                if self.utils.detect_client_portal(soup, page_text, url):
+                    agency.digital_capabilities.client_portal = True
+                
+                # Extract role levels on every page
+                role_levels = self.utils.fetch_role_levels(page_text, url)
+                if role_levels:
+                    if not agency.role_levels:
+                        agency.role_levels = []
+                    agency.role_levels.extend(role_levels)
+                    agency.role_levels = list(set(agency.role_levels))
+                
+                # Extract review sources
+                review_sources = self.utils.fetch_review_sources(soup, url)
+                if review_sources and not agency.review_sources:
+                    agency.review_sources = review_sources
                 
                 # Extract services from diensten page
                 if url == "https://asatalent.nl/werkgevers/diensten":
