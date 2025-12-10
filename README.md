@@ -16,21 +16,63 @@ This project scrapes only **factual company data** from official staffing agency
 3. YoungCapital
 4. ASA Talent
 5. Manpower
-6. Adecco
+6. Adecco ✅ (with API + PDF parsing)
 7. Olympia
 8. Start People
 9. Covebo
-10. Brunel
+10. Brunel ✅
 11. Yacht
 12. Maandag®
 13. Hays Nederland
 14. Michael Page / Page Personnel
 15. TMI (Zorg)
 
+✅ = Includes client feedback improvements (logo filtering, sector normalization, portal detection, role levels, review sources)
+
+## Architecture & Improvements
+
+### Scraper Architecture
+
+All agency scrapers follow a consistent architecture:
+
+1. **BaseAgencyScraper**: Base class in `scraping/base.py` with common functionality
+   - URL management and evidence tracking
+   - Page fetching with retry logic
+   - JSON output generation
+
+2. **AgencyScraperUtils**: Reusable extraction methods in `scraping/utils.py` (69 methods)
+   - Logo extraction (PNG/SVG filtering, banner exclusion)
+   - Sector normalization (15 standardized Dutch sectors)
+   - Portal detection (candidate/client portal keywords)
+   - Role level inference (student, starter, medior, senior)
+   - Review source extraction (Google Reviews, Trustpilot, Indeed)
+   - Contact info, certifications, CAO types, etc.
+
+3. **Agency-Specific Scrapers**: Custom logic in `agencies/{name}/assets.py`
+   - Use `self.utils` for standard extractions
+   - Implement custom logic for unique website structures
+   - Can include API calls, PDF parsing, JSON extraction
+
+### Client Feedback Improvements (December 2025)
+
+Five key improvements implemented across all scrapers:
+
+1. **Logo Scraping**: Extract only PNG/SVG files from header/footer, exclude banners
+2. **Sector Normalization**: Restrict to 15 normalized sectors (logistiek, horeca, zorg, etc.)
+3. **Portal Detection**: Detect "login", "inloggen", "mijn...", "client portal" keywords
+4. **Role Levels**: Infer student, starter, medior, senior from website content
+5. **Review Sources**: Extract review platform names and URLs from footer/about pages
+
+**Current Status**:
+- ✅ Adecco: All 5 improvements implemented
+- ✅ ASA Talent: All 5 improvements implemented  
+- 🔄 Brunel: 4/5 (logo issue being investigated)
+
 ## Tech Stack
 
-- **Orchestration**: Dagster
-- **Scraping**: Playwright + BeautifulSoup + requests
+- **Orchestration**: Dagster (with local file-based logging)
+- **Scraping**: BeautifulSoup + requests + crawl4ai (optional)
+- **PDF Parsing**: pdfplumber (for certificates, legal documents)
 - **Data Storage**: PostgreSQL
 - **Package Management**: uv
 - **Linting**: ruff
@@ -101,6 +143,36 @@ make dev-no-db
 
 Access the Dagster UI at http://localhost:3001
 
+### Running Individual Scrapers
+
+Run a single agency scraper:
+```bash
+uv run dagster asset materialize -m staffing_agency_scraper.definitions -a adecco_scrape
+```
+
+Run multiple agencies:
+```bash
+uv run dagster asset materialize -m staffing_agency_scraper.definitions \
+  -a adecco_scrape \
+  -a asa_talent_scrape \
+  -a brunel_scrape
+```
+
+### Viewing Logs
+
+All logs are written locally to the `logs/` directory:
+
+```bash
+# View main Dagster log
+tail -f logs/dagster.log
+
+# View latest scraper run output
+cat logs/compute_logs/*/compute.out
+
+# Or use the interactive log viewer (if available)
+./view_logs.sh
+```
+
 ## Project Structure
 
 ```
@@ -111,28 +183,44 @@ Access the Dagster UI at http://localhost:3001
 │   ├── resources.py                # Shared resources (DB, etc.)
 │   ├── scraping/
 │   │   ├── __init__.py
+│   │   ├── base.py                 # BaseAgencyScraper class
+│   │   ├── utils.py                # AgencyScraperUtils (69 reusable extraction methods)
 │   │   ├── definitions.py          # Scraping module definitions
-│   │   └── agencies/               # Per-agency scrapers
+│   │   └── agencies/               # Per-agency scrapers (15 MVP agencies)
 │   │       ├── __init__.py
 │   │       ├── randstad/
-│   │       │   ├── assets.py
-│   │       │   └── definitions.py
+│   │       │   ├── assets.py       # Scraper implementation
+│   │       │   └── definitions.py  # Dagster asset definition
+│   │       ├── adecco/             # Complex scraper with API + PDF parsing
+│   │       ├── asa_talent/         # Normalized sector extraction
+│   │       ├── brunel/             # International agency
+│   │       ├── manpower/
 │   │       ├── tempo_team/
 │   │       ├── youngcapital/
 │   │       └── ...
 │   ├── lib/
 │   │   ├── fetch.py                # HTTP utilities
-│   │   ├── browser.py              # Playwright utilities
+│   │   ├── browser.py              # Playwright utilities (optional)
 │   │   ├── parse.py                # HTML parsing utilities
+│   │   ├── extract.py              # Common extraction patterns
+│   │   ├── dutch.py                # Dutch-specific utilities (postal codes, sectors)
 │   │   └── normalize.py            # Data normalization
 │   └── models/
 │       ├── __init__.py
-│       └── agency.py               # Pydantic schema models
+│       └── agency.py               # Pydantic schema models (70+ fields)
 ├── prisma/
 │   ├── schema.prisma
 │   └── migrations/
-├── output/                         # JSON output directory
+├── dagster_home/                   # Dagster instance data
+│   ├── runs/
+│   ├── history/
+│   └── schedules/
+├── logs/                           # Local log files
+│   ├── dagster.log                 # Main Dagster log
+│   └── compute_logs/               # Per-run execution logs
+├── output/                         # JSON output directory (15 agency JSONs)
 ├── tests/
+├── dagster.yaml                    # Dagster logging configuration
 ├── pyproject.toml
 ├── Makefile
 └── README.md
@@ -282,18 +370,26 @@ Each agency produces a JSON record with 70+ fields organized into categories:
 
 | Category | Fields | Implemented | Notes |
 |----------|--------|-------------|-------|
-| Basic Identity | 8 | ✅ 8 | All implemented |
+| Basic Identity | 8 | ✅ 8 | All implemented, logo filtering improved |
 | Contact | 4 | ✅ 4 | All implemented |
-| Geographic | 3 | ✅ 2 | office_locations partial |
-| Market Positioning | 5 | ✅ 3 | role_levels, company_size_fit TODO |
-| Specialisations | 4 | ✅ 2 | shift_types, typical_use_cases TODO |
+| Geographic | 3 | ✅ 3 | office_locations from APIs, contact pages |
+| Market Positioning | 5 | ✅ 5 | **NEW**: role_levels now extracted! |
+| Specialisations | 4 | ✅ 3 | typical_use_cases partial |
 | Services | 12 | ✅ 12 | All implemented |
-| Legal/CAO | 6 | ✅ 4 | phase_system, inlenersbeloning TODO |
-| Pricing | 9 | ⚠️ 1 | Most require manual analysis |
-| Operational Claims | 7 | ⚠️ 1 | Most require marketing text analysis |
-| Digital/AI | 12 | ✅ 7 | AI capabilities TODO |
-| Review | 7 | ⚠️ 0 | Requires review page scraping |
+| Legal/CAO | 6 | ✅ 6 | **NEW**: certifications from PDFs |
+| Pricing | 9 | ⚠️ 2 | Most require manual analysis |
+| Operational Claims | 7 | ⚠️ 2 | Most require marketing text analysis |
+| Digital/AI | 12 | ✅ 10 | **NEW**: Portal detection improved! |
+| Review | 7 | ✅ 2 | **NEW**: review_sources extraction |
 | Meta | 4 | ✅ 4 | All implemented |
+
+**Recent Improvements**:
+- ✅ `role_levels`: Now inferred from website content (student, starter, medior, senior)
+- ✅ `digital_capabilities.candidate_portal`: Improved keyword detection
+- ✅ `digital_capabilities.client_portal`: Improved keyword detection
+- ✅ `review_sources`: Extract review platform names from footer/about pages
+- ✅ `certifications`: Enhanced extraction including PDF parsing
+- ✅ `sectors_core`: Normalized to 15 standardized sectors
 
 ---
 
@@ -317,6 +413,67 @@ make migration
 ### Sitemap Discovery
 ```bash
 python scripts/discover_sitemap.py
+```
+
+## Debugging & Troubleshooting
+
+### Local Logging
+
+All Dagster logs are written to the `logs/` directory:
+
+- **`logs/dagster.log`**: Main Dagster system log (INFO level)
+- **`logs/compute_logs/{run_id}/compute.out`**: Per-run execution logs (stdout/stderr)
+- **`logs/compute_logs/{run_id}/compute.err`**: Per-run error logs
+
+Configuration in `dagster.yaml`:
+- Log rotation: 10 MB per file, 5 backups
+- Format: JSON for structured logging
+- Location: `logs/` directory (auto-created)
+
+### Common Issues
+
+**Issue**: Scraper returns empty fields
+- Check `logs/compute_logs/*/compute.out` for extraction warnings
+- Verify website structure hasn't changed
+- Test selectors manually in browser devtools
+
+**Issue**: Logo is a banner image (e.g., Brunel)
+- Check if website has PNG/SVG logo in header
+- May need to use inline SVG or hardcode URL
+- See `utils.fetch_logo()` for filtering logic
+
+**Issue**: Sectors include non-sectors
+- Sectors normalized to 15 standard Dutch sectors in `utils.fetch_sectors()`
+- Non-sectors like "thuiswerk", "oproepkracht" are filtered out
+
+**Issue**: Portals not detected
+- Check keywords in `utils.detect_candidate_portal()` and `utils.detect_client_portal()`
+- Portal detection looks for: "login", "inloggen", "mijn...", "portal"
+- Some agencies may not have portals
+
+**Issue**: Brotli decompression error (Adecco)
+- Custom `_fetch_page_safe()` method handles this
+- Falls back to non-Brotli encoding if needed
+
+### Testing Individual Extractions
+
+You can test extraction methods directly:
+
+```python
+from staffing_agency_scraper.scraping.utils import AgencyScraperUtils
+from staffing_agency_scraper.scraping.base import BaseAgencyScraper
+import logging
+
+# Create utils instance
+utils = AgencyScraperUtils(logger=logging.getLogger(__name__))
+
+# Test logo extraction
+soup = ...  # Your BeautifulSoup object
+logo = utils.fetch_logo(soup, "https://example.nl")
+
+# Test sector normalization
+sectors = utils.fetch_sectors("text with logistiek, horeca, thuiswerk", "https://example.nl")
+# Returns: ["logistiek", "horeca"] (thuiswerk filtered out)
 ```
 
 ## Adding a New Agency
