@@ -45,6 +45,7 @@ from staffing_agency_scraper.lib.parse import (
     parse_html,
 )
 from staffing_agency_scraper.models import Agency, AgencyServices
+from staffing_agency_scraper.scraping.utils import AgencyScraperUtils
 
 if TYPE_CHECKING:
     from bs4 import BeautifulSoup
@@ -72,6 +73,8 @@ class BaseAgencyScraper(ABC):
         self.logger = dg.get_dagster_logger(f"{self.__class__.__name__}_scraper")
         self.evidence_urls: list[str] = []  # List of URLs used as evidence
         self.collected_at = datetime.utcnow()
+        # Initialize utility functions (can be overridden in subclass)
+        self.utils = AgencyScraperUtils(logger=self.logger)
 
     @abstractmethod
     def scrape(self) -> Agency:
@@ -267,6 +270,160 @@ class BaseAgencyScraper(ABC):
             collected_at=self.collected_at,
         )
 
+    def extract_all_common_fields(self, agency: Agency, all_text: str, soup: BeautifulSoup = None) -> None:
+        """
+        Extract all common fields using AgencyScraperUtils.
+        
+        This method centralizes the extraction of all standard fields to reduce
+        code duplication across scrapers. Call this method from your scraper's
+        scrape() method after collecting all page text.
+        
+        Override individual util methods in subclass if you need custom extraction logic.
+        
+        Parameters
+        ----------
+        agency : Agency
+            Agency object to update with extracted data
+        all_text : str
+            Accumulated text from all scraped pages
+        soup : BeautifulSoup, optional
+            Main page soup for portal detection and review extraction
+        
+        Example
+        -------
+        ```python
+        def scrape(self) -> Agency:
+            agency = self.create_base_agency()
+            all_text = ""
+            
+            # Scrape all pages
+            for url in self.PAGES_TO_SCRAPE:
+                soup = self.fetch_page(url)
+                all_text += soup.get_text(separator=" ", strip=True)
+            
+            # Extract all common fields in one call!
+            self.extract_all_common_fields(agency, all_text, soup)
+            
+            # Do any custom extractions specific to this agency
+            agency.special_field = self._custom_extraction(all_text)
+            
+            return agency
+        ```
+        """
+        url = "accumulated_text"
+        
+        # ==================== Market Positioning ====================
+        if not agency.company_size_fit:
+            agency.company_size_fit = self.utils.fetch_company_size_fit(all_text, url)
+        
+        if not agency.customer_segments:
+            agency.customer_segments = self.utils.fetch_customer_segments(all_text, url)
+        
+        if not agency.focus_segments:
+            agency.focus_segments = self.utils.fetch_focus_segments(all_text, url)
+        
+        if not agency.shift_types_supported:
+            agency.shift_types_supported = self.utils.fetch_shift_types_supported(all_text, url)
+        
+        if not agency.typical_use_cases:
+            agency.typical_use_cases = self.utils.fetch_typical_use_cases(all_text, url)
+        
+        if not agency.role_levels:
+            agency.role_levels = self.utils.fetch_role_levels(all_text, url)
+        
+        # ==================== Volume & Performance ====================
+        if agency.volume_specialisation == "unknown":
+            agency.volume_specialisation = self.utils.fetch_volume_specialisation(all_text, url)
+        
+        if not agency.speed_claims:
+            agency.speed_claims = self.utils.fetch_speed_claims(all_text, url)
+        
+        if not agency.avg_time_to_fill_days:
+            agency.avg_time_to_fill_days = self.utils.fetch_avg_time_to_fill(all_text, url)
+        
+        if not agency.candidate_pool_size_estimate:
+            agency.candidate_pool_size_estimate = self.utils.fetch_candidate_pool_size(all_text, url)
+        
+        if not agency.annual_placements_estimate:
+            agency.annual_placements_estimate = self.utils.fetch_annual_placements(all_text, url)
+        
+        # ==================== Pricing & Commercial ====================
+        if agency.pricing_model == "unknown":
+            agency.pricing_model = self.utils.fetch_pricing_model(all_text, url)
+        
+        if not agency.pricing_transparency:
+            agency.pricing_transparency = self.utils.fetch_pricing_transparency(all_text, url)
+        
+        if agency.no_cure_no_pay is None:
+            agency.no_cure_no_pay = self.utils.fetch_no_cure_no_pay(all_text, url)
+        
+        if not agency.omrekenfactor_min and not agency.omrekenfactor_max:
+            omrekenfactor_min, omrekenfactor_max = self.utils.fetch_omrekenfactor(all_text, url)
+            if omrekenfactor_min:
+                agency.omrekenfactor_min = omrekenfactor_min
+            if omrekenfactor_max:
+                agency.omrekenfactor_max = omrekenfactor_max
+        
+        if not agency.avg_hourly_rate_low and not agency.avg_hourly_rate_high:
+            rate_low, rate_high = self.utils.fetch_avg_hourly_rate(all_text, url)
+            if rate_low:
+                agency.avg_hourly_rate_low = rate_low
+            if rate_high:
+                agency.avg_hourly_rate_high = rate_high
+        
+        # ==================== Legal & Compliance ====================
+        if agency.uses_inlenersbeloning is None:
+            agency.uses_inlenersbeloning = self.utils.fetch_uses_inlenersbeloning(all_text, url)
+        
+        if agency.applies_inlenersbeloning_from_day1 is None:
+            agency.applies_inlenersbeloning_from_day1 = self.utils.fetch_applies_inlenersbeloning_from_day1(all_text, url)
+        
+        # ==================== Assignment Conditions ====================
+        if not agency.min_assignment_duration_weeks:
+            agency.min_assignment_duration_weeks = self.utils.fetch_min_assignment_duration(all_text, url)
+        
+        if not agency.min_hours_per_week:
+            agency.min_hours_per_week = self.utils.fetch_min_hours_per_week(all_text, url)
+        
+        # ==================== Takeover Policy ====================
+        if not agency.takeover_policy or (agency.takeover_policy.overname_fee_model == "unknown" if hasattr(agency.takeover_policy, 'overname_fee_model') else True):
+            takeover_data = self.utils.fetch_takeover_policy(all_text, url)
+            if takeover_data and takeover_data.get("overname_fee_model") != "unknown":
+                # Convert dict to model if needed
+                from staffing_agency_scraper.models import TakeoverPolicy
+                if isinstance(takeover_data, dict):
+                    agency.takeover_policy = TakeoverPolicy(**takeover_data)
+                else:
+                    agency.takeover_policy = takeover_data
+        
+        # ==================== Portal & Review Detection (requires soup) ====================
+        if soup:
+            # Portal detection
+            if self.utils.detect_candidate_portal(soup, all_text, url):
+                agency.digital_capabilities.candidate_portal = True
+            if self.utils.detect_client_portal(soup, all_text, url):
+                agency.digital_capabilities.client_portal = True
+            
+            # Review sources
+            if not agency.review_sources:
+                agency.review_sources = self.utils.fetch_review_sources(soup, url)
+            
+            # Review rating and count
+            if not agency.review_rating and not agency.review_count:
+                rating, count = self.utils.fetch_review_rating_and_count(soup, url)
+                if rating:
+                    agency.review_rating = rating
+                if count:
+                    agency.review_count = count
+            
+            # External review URLs
+            if agency.review_sources and not agency.external_review_urls:
+                agency.external_review_urls = self.utils.fetch_external_review_urls(agency.review_sources)
+        
+        # ==================== Growth Signals ====================
+        if not agency.growth_signals:
+            agency.growth_signals = self.utils.fetch_growth_signals(all_text, url)
+    
     def scrape_all_pages(self, agency: Agency) -> Agency:
         """
         Enhanced scrape of all configured pages with automatic extraction.

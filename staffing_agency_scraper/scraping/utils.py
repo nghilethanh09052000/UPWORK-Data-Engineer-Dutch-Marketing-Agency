@@ -1267,4 +1267,168 @@ class AgencyScraperUtils:
             return hours
         
         return None
+    
+    def fetch_avg_hourly_rate(self, text: str, url: str) -> tuple[Optional[float], Optional[float]]:
+        """
+        Extract average hourly rate range from text.
+        
+        Returns:
+        - (low, high) tuple of floats
+        - (None, None) if not found
+        """
+        # Patterns: "€25-35 per uur", "vanaf €20 per uur", "€18,50 per uur"
+        patterns = [
+            r'€\s*(\d+(?:[.,]\d+)?)\s*-\s*€?\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?uur',  # Range: €25-35 per uur
+            r'€\s*(\d+(?:[.,]\d+)?)\s+tot\s+€?\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?uur',  # Range: €25 tot €35 per uur
+            r'vanaf\s+€\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?uur',  # From: vanaf €25 per uur
+            r'€\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?uur',  # Single: €25 per uur
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text.lower())
+            if match:
+                if len(match.groups()) == 2:
+                    # Range found
+                    low = float(match.group(1).replace(',', '.'))
+                    high = float(match.group(2).replace(',', '.'))
+                    self.logger.info(f"✓ Found avg hourly rate: €{low}-{high} | Source: {url}")
+                    return (low, high)
+                elif len(match.groups()) == 1:
+                    # Single value or "from" value
+                    rate = float(match.group(1).replace(',', '.'))
+                    if 'vanaf' in text.lower():
+                        self.logger.info(f"✓ Found avg hourly rate: from €{rate} | Source: {url}")
+                        return (rate, None)
+                    else:
+                        self.logger.info(f"✓ Found avg hourly rate: €{rate} | Source: {url}")
+                        return (rate, rate)
+        
+        return (None, None)
+    
+    def fetch_review_rating_and_count(self, soup: BeautifulSoup, url: str) -> tuple[Optional[float], Optional[int]]:
+        """
+        Extract review rating and count from their own website.
+        
+        Returns:
+        - (rating, count) tuple
+        - (None, None) if not found
+        """
+        # Look for common rating patterns
+        rating = None
+        count = None
+        
+        # Pattern 1: Schema.org structured data
+        # <span itemprop="ratingValue">4.5</span>
+        # <span itemprop="reviewCount">123</span>
+        rating_elem = soup.find(attrs={"itemprop": "ratingValue"})
+        if rating_elem:
+            try:
+                rating = float(rating_elem.get_text(strip=True))
+                self.logger.info(f"✓ Found review rating: {rating} | Source: {url}")
+            except:
+                pass
+        
+        count_elem = soup.find(attrs={"itemprop": "reviewCount"})
+        if count_elem:
+            try:
+                count_text = count_elem.get_text(strip=True).replace('.', '').replace(',', '')
+                count = int(count_text)
+                self.logger.info(f"✓ Found review count: {count} | Source: {url}")
+            except:
+                pass
+        
+        # Pattern 2: Text patterns like "4.5 sterren (123 reviews)"
+        if rating is None or count is None:
+            page_text = soup.get_text()
+            rating_match = re.search(r'(\d+[.,]\d+)\s*(?:sterren|stars|uit 5)', page_text)
+            if rating_match:
+                rating = float(rating_match.group(1).replace(',', '.'))
+                self.logger.info(f"✓ Found review rating: {rating} | Source: {url}")
+            
+            count_match = re.search(r'\(?\s*(\d+)\s*(?:reviews|beoordelingen|recensies)', page_text, re.IGNORECASE)
+            if count_match:
+                count = int(count_match.group(1))
+                self.logger.info(f"✓ Found review count: {count} | Source: {url}")
+        
+        return (rating, count)
+    
+    def fetch_external_review_urls(self, review_sources: List[Dict[str, str]]) -> List[str]:
+        """
+        Extract external review URLs from review_sources list.
+        
+        Args:
+            review_sources: List of dicts with 'platform' and 'url' keys
+        
+        Returns:
+            List of external review URLs
+        """
+        if not review_sources:
+            return []
+        
+        urls = [source.get("url") for source in review_sources if source.get("url")]
+        return urls
+    
+    def fetch_takeover_policy(self, text: str, url: str) -> dict:
+        """
+        Extract takeover/overname policy from terms & conditions.
+        
+        Returns dict with:
+        - free_takeover_hours: int or None
+        - free_takeover_weeks: int or None
+        - overname_fee_model: "none" | "flat_fee" | "percentage_salary" | "scaled" | "unknown"
+        - overname_fee_hint: str or None
+        - overname_contract_reference: str (url) or None
+        """
+        text_lower = text.lower()
+        result = {
+            "free_takeover_hours": None,
+            "free_takeover_weeks": None,
+            "overname_fee_model": "unknown",
+            "overname_fee_hint": None,
+            "overname_contract_reference": url if any(x in url.lower() for x in ["terms", "conditions", "voorwaarden", "algemene"]) else None
+        }
+        
+        # Look for free takeover period
+        # Pattern: "na X uren gratis overnemen", "na X weken overname zonder kosten"
+        hours_match = re.search(r'na\s+(\d+)\s+uren?\s+(?:gratis|kosteloos|zonder\s+kosten)?\s*(?:overnemen|overname)', text_lower)
+        if hours_match:
+            result["free_takeover_hours"] = int(hours_match.group(1))
+            self.logger.info(f"✓ Found free takeover hours: {result['free_takeover_hours']} | Source: {url}")
+        
+        weeks_match = re.search(r'na\s+(\d+)\s+weken?\s+(?:gratis|kosteloos|zonder\s+kosten)?\s*(?:overnemen|overname)', text_lower)
+        if weeks_match:
+            result["free_takeover_weeks"] = int(weeks_match.group(1))
+            self.logger.info(f"✓ Found free takeover weeks: {result['free_takeover_weeks']} | Source: {url}")
+        
+        # Detect fee model
+        if "geen overnamekosten" in text_lower or "gratis overnemen" in text_lower:
+            result["overname_fee_model"] = "none"
+            result["overname_fee_hint"] = "Gratis overnemen na werkperiode"
+            self.logger.info(f"✓ Found takeover fee model: none | Source: {url}")
+        elif "vast bedrag" in text_lower or "vaste vergoeding" in text_lower:
+            result["overname_fee_model"] = "flat_fee"
+            # Try to extract the amount
+            fee_match = re.search(r'€\s*(\d+(?:[.,]\d+)?)\s*(?:voor\s+)?overname', text_lower)
+            if fee_match:
+                amount = fee_match.group(1)
+                result["overname_fee_hint"] = f"Vast bedrag van €{amount}"
+            else:
+                result["overname_fee_hint"] = "Vast bedrag voor overname"
+            self.logger.info(f"✓ Found takeover fee model: flat_fee | Source: {url}")
+        elif "percentage" in text_lower and "salaris" in text_lower:
+            result["overname_fee_model"] = "percentage_salary"
+            # Try to extract percentage
+            pct_match = re.search(r'(\d+)%\s*(?:van|of)?\s*(?:het\s+)?(?:bruto\s+)?(?:jaar|maand)?salaris', text_lower)
+            if pct_match:
+                pct = pct_match.group(1)
+                result["overname_fee_hint"] = f"{pct}% van salaris"
+            else:
+                result["overname_fee_hint"] = "Percentage van salaris"
+            self.logger.info(f"✓ Found takeover fee model: percentage_salary | Source: {url}")
+        elif "schaal" in text_lower or "oplopend" in text_lower:
+            result["overname_fee_model"] = "scaled"
+            result["overname_fee_hint"] = "Schaaltarief afhankelijk van periode"
+            self.logger.info(f"✓ Found takeover fee model: scaled | Source: {url}")
+        
+        return result
 
