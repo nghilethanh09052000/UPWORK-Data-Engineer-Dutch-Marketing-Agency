@@ -41,6 +41,11 @@ class MichaelPageScraper(BaseAgencyScraper):
             "url": "https://www.michaelpage.nl/contact",
             "functions": ["contact", "offices"],
         },
+        {
+            "name": "privacy",
+            "url": "https://www.michaelpage.nl/privacy-beleid",
+            "functions": ["legal", "contact"],
+        },
     ]
 
     def scrape(self) -> Agency:
