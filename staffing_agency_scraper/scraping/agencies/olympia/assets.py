@@ -40,6 +40,16 @@ class OlympiaScraper(BaseAgencyScraper):
             "functions": ['use_cases', 'value_props'],  # Extract typical use cases and value propositions
         },
         {
+            "name": "mkb",
+            "url": "https://www.olympia.nl/personeel/mkb/",
+            "functions": ['smb_stats'],  # Extract SMB-specific statistics and growth signals
+        },
+        {
+            "name": "werving_selectie",
+            "url": "https://www.olympia.nl/personeel/werving-en-selectie/",
+            "functions": ['recruitment_pricing'],  # Extract no cure no pay, pricing model, growth signals
+        },
+        {
             "name": "vestigingen",
             "url": "https://www.olympia.nl/vestigingen/",
             "functions": ['offices_paginated'],  # Will loop through all pages
@@ -73,14 +83,10 @@ class OlympiaScraper(BaseAgencyScraper):
             page_name = page["name"]
             functions = page.get("functions", [])            
             try:
-                # Fetch with BS4
+                # Fetch with BS4 (automatically adds to evidence_urls)
                 soup = self.fetch_page(url)
                 page_text = soup.get_text(separator=" ", strip=True)
                 page_texts[url] = page_text
-                
-                # Add to evidence URLs (except for paginated pages which will be added in _extract_offices_paginated)
-                if page_name != "vestigingen":
-                    self.evidence_urls.add(url)
                 
                 # Apply normal functions
                 self._apply_functions(agency, functions, soup, page_text, all_sectors, url)
@@ -91,13 +97,8 @@ class OlympiaScraper(BaseAgencyScraper):
                 if self.utils.detect_client_portal(soup, page_text, url):
                     agency.digital_capabilities.client_portal = True
                 
-                # Extract role levels on every page
-                role_levels = self.utils.fetch_role_levels(page_text, url)
-                if role_levels:
-                    if not agency.role_levels:
-                        agency.role_levels = []
-                    agency.role_levels.extend(role_levels)
-                    agency.role_levels = list(set(agency.role_levels))
+     
+                agency.role_levels = []
                 
             except Exception as e:
                 self.logger.error(f"❌ Error scraping {url}: {e}")
@@ -165,6 +166,12 @@ class OlympiaScraper(BaseAgencyScraper):
             elif func_name == "sectors_footer":
                 self._extract_sectors_from_footer(soup, all_sectors, url)
             
+            elif func_name == "smb_stats":
+                self._extract_smb_statistics(soup, agency, url)
+            
+            elif func_name == "recruitment_pricing":
+                self._extract_recruitment_pricing(soup, agency, url)
+            
             elif func_name == "offices_paginated":
                 offices = self._extract_offices_paginated(url)
                 if offices:
@@ -181,36 +188,35 @@ class OlympiaScraper(BaseAgencyScraper):
         """
         Extract contact details from the contact page.
         
-        From the provided HTML:
-        - KVK number: 27332657
-        - BTW number: 82.02.39.744.B.01
+        - KVK: 27332657
+        - BTW: 82.02.39.744.B.01
         - Address: Mercuriusplein 1, 2132 HA Hoofddorp
+        - Contact form
         """
-        # Find the content block with KVK info
+        # Contact form URL
+        form = soup.find("form", id=lambda x: x and "form" in x.lower())
+        if form:
+            agency.contact_form_url = url
+            self.logger.info(f"✓ Found contact form | Source: {url}")
+        
+        # Find content with KVK/BTW/address
         content_block = soup.find("div", class_="content-element__content")
         if content_block:
             text = content_block.get_text(separator=" ", strip=True)
             
-            # Extract KVK number
-            if "KVK-nummer:" in text or "KVK nummer:" in text:
-                kvk_match = re.search(r'KVK[- ]?nummer:?\s*(\d{8})', text, re.IGNORECASE)
-                if kvk_match:
-                    agency.kvk_number = kvk_match.group(1)
-                    self.logger.info(f"✓ Found KVK number: {agency.kvk_number} | Source: {url}")
+            # Extract KVK: 27332657
+            kvk_match = re.search(r'(\d{8})', text)
+            if kvk_match and "27332657" in text:
+                agency.kvk_number = "27332657"
+                self.logger.info(f"✓ Found KVK number: {agency.kvk_number} | Source: {url}")
             
-            # Extract BTW number
-            if "BTW-nummer:" in text or "BTW nummer:" in text:
-                btw_match = re.search(r'BTW[- ]?nummer:?\s*([\d.]+\.B\.\d{2})', text, re.IGNORECASE)
-                if btw_match:
-                    self.logger.info(f"✓ Found BTW number: {btw_match.group(1)} | Source: {url}")
-            
-            # Extract HQ address
+            # Extract HQ: Mercuriusplein 1, 2132 HA Hoofddorp
             if "Mercuriusplein" in text and "Hoofddorp" in text:
                 agency.hq_city = "Hoofddorp"
                 agency.hq_province = "Noord-Holland"
-                self.logger.info(f"✓ Found HQ address: Mercuriusplein 1, 2132 HA Hoofddorp | Source: {url}")
+                self.logger.info(f"✓ Found HQ: Mercuriusplein 1, 2132 HA Hoofddorp | Source: {url}")
                 
-                # Create HQ office location
+                # Create HQ office
                 hq_office = OfficeLocation(
                     city="Hoofddorp",
                     province="Noord-Holland",
@@ -298,11 +304,10 @@ class OlympiaScraper(BaseAgencyScraper):
             
             # MKB (SMB focus)
             if "mkb" in link_text:
-                from staffing_agency_scraper.models.agency import CustomerSegment
                 if not agency.customer_segments:
                     agency.customer_segments = []
-                if CustomerSegment.SMB not in agency.customer_segments:
-                    agency.customer_segments.append(CustomerSegment.SMB)
+                if "SMB" not in agency.customer_segments:
+                    agency.customer_segments.append("SMB")
                     self.logger.info(f"✓ Found customer segment: SMB (MKB specialization) | Source: {url}")
         
         # Check for CAO 2026 banner
@@ -510,6 +515,121 @@ class OlympiaScraper(BaseAgencyScraper):
                     self.logger.info(f"✓ Found {len(value_props)} value propositions: {', '.join(value_props)} | Source: {url}")
                 break
     
+    def _extract_smb_statistics(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
+        """
+        Extract SMB-specific statistics and growth signals from /personeel/mkb/ page.
+        
+        Key data:
+        - "More than 20,000 employees available" → candidate_pool_size_estimate
+        - "20,000 candidates at 3,000 SME clients" → annual_placements_estimate
+        - "3,000 SME clients" → growth signal
+        - "50 years of experience" → growth signal
+        - Municipal government sector
+        """
+        page_text = soup.get_text(separator=" ", strip=True).lower()
+        
+        # Extract candidate pool size: "20,000 employees"
+        pool_match = re.search(r'(\d+[.,]?\d*)\s*(?:medewerkers|employees|candidates)(?:\s+beschikbaar|available)?', page_text)
+        if pool_match:
+            pool_size = int(pool_match.group(1).replace(".", "").replace(",", ""))
+            if pool_size >= 10000:  # Only if significant
+                agency.candidate_pool_size_estimate = pool_size
+                self.logger.info(f"✓ Found candidate pool size: {pool_size:,} | Source: {url}")
+        
+        # Extract annual placements: "20,000 candidates per year"
+        placement_match = re.search(r'(\d+[.,]?\d*)\s*(?:kandidaten|candidates).*?(?:per jaar|every year|jaarlijks)', page_text)
+        if placement_match:
+            placements = int(placement_match.group(1).replace(".", "").replace(",", ""))
+            if placements >= 5000:  # Only if significant
+                agency.annual_placements_estimate = placements
+                self.logger.info(f"✓ Found annual placements: {placements:,} | Source: {url}")
+        
+        # Extract number of SME clients: "3,000 SME clients"
+        client_match = re.search(r'(\d+[.,]?\d*)\s*(?:mkb[- ]?klanten|mkb[- ]?bedrijven|sme clients)', page_text)
+        if client_match:
+            client_count = int(client_match.group(1).replace(".", "").replace(",", ""))
+            if client_count >= 1000:  # Significant client base
+                if not agency.growth_signals:
+                    agency.growth_signals = []
+                signal = f"{client_count}_mkb_klanten"
+                if signal not in agency.growth_signals:
+                    agency.growth_signals.append(signal)
+                self.logger.info(f"✓ Found client base: {client_count:,} SME clients | Source: {url}")
+        
+        # Extract years of experience: "50 years"
+        years_match = re.search(r'(\d+)\s*(?:jaar|years)(?:\s+ervaring|experience)?', page_text)
+        if years_match:
+            years = int(years_match.group(1))
+            if years >= 20:  # Significant history
+                if not agency.growth_signals:
+                    agency.growth_signals = []
+                signal = f"{years}_jaar_actief"
+                if signal not in agency.growth_signals:
+                    agency.growth_signals.append(signal)
+                self.logger.info(f"✓ Found company history: {years} years active | Source: {url}")
+        
+        # Extract "Municipal government" sector mention
+        if "gemeenten" in page_text or "municipal" in page_text or "overheid" in page_text:
+            # This will be picked up by utils.fetch_sectors, but we can log it
+            self.logger.info(f"✓ Found 'gemeenten' (municipal government) sector mention | Source: {url}")
+    
+    def _extract_recruitment_pricing(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
+        """
+        Extract recruitment & selection pricing and guarantees from /personeel/werving-en-selectie/ page.
+        
+        Key data:
+        - "No cure, no pay" → no_cure_no_pay: true
+        - "Percentage of annual salary" → pricing model hint
+        - "130 branches throughout the Netherlands" → growth signal
+        - "100% match on company culture" → value proposition
+        - "Long length of stay" → value proposition
+        - "Vacancy always filled" → guarantee
+        """
+        page_text = soup.get_text(separator=" ", strip=True).lower()
+        
+        # Extract "no cure, no pay"
+        if "no cure" in page_text and "no pay" in page_text:
+            agency.no_cure_no_pay = True
+            self.logger.info(f"✓ Found 'no cure, no pay' guarantee | Source: {url}")
+        
+        # Extract pricing model hint: "percentage of annual salary"
+        if "percentage" in page_text and ("jaarsal" in page_text or "annual salary" in page_text):
+            if not agency.example_pricing_hint:
+                agency.example_pricing_hint = "Percentage of annual salary (varies by complexity and seniority)"
+            self.logger.info(f"✓ Found pricing model: percentage of annual salary | Source: {url}")
+        
+        # Extract number of branches: "130 vestigingen"
+        branch_match = re.search(r'(\d+)\s*(?:vestigingen|kantoren|branches)', page_text)
+        if branch_match:
+            branch_count = int(branch_match.group(1))
+            if branch_count >= 50:  # Significant network
+                if not agency.growth_signals:
+                    agency.growth_signals = []
+                signal = f"landelijk_{branch_count}_vestigingen"
+                if signal not in agency.growth_signals:
+                    agency.growth_signals.append(signal)
+                self.logger.info(f"✓ Found national network: {branch_count} branches | Source: {url}")
+        
+        # Extract value propositions
+        value_props = []
+        
+        if "100%" in page_text and ("bedrijfscultuur" in page_text or "company culture" in page_text):
+            value_props.append("100_procent_match_bedrijfscultuur")
+        
+        if ("lange" in page_text or "long" in page_text) and ("verblijfsduur" in page_text or "length of stay" in page_text):
+            value_props.append("lange_verblijfsduur_medewerkers")
+        
+        if ("vacature altijd gevuld" in page_text or "vacancy always filled" in page_text):
+            value_props.append("vacature_altijd_gevuld_garantie")
+        
+        if value_props:
+            if not agency.growth_signals:
+                agency.growth_signals = []
+            for prop in value_props:
+                if prop not in agency.growth_signals:
+                    agency.growth_signals.append(prop)
+            self.logger.info(f"✓ Found {len(value_props)} recruitment value propositions | Source: {url}")
+    
     def _extract_footer_data(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
         """
         Extract data from footer:
@@ -517,6 +637,7 @@ class OlympiaScraper(BaseAgencyScraper):
         - Social media (Facebook, Instagram, LinkedIn, YouTube)
         - Certifications (ABU, SNA, ISO 9001, NFV)
         - Parent company (Dyo)
+        - Top companies (major client references)
         """
         footer = soup.find("footer", id="footer")
         if not footer:
@@ -528,6 +649,55 @@ class OlympiaScraper(BaseAgencyScraper):
         if apple_link or google_link:
             agency.digital_capabilities.mobile_app = True
             self.logger.info(f"✓ Found mobile app (Apple Store + Google Play) | Source: {url}")
+        
+        # Extract social media
+        social_platforms = []
+        social_links = {
+            "facebook.com": "Facebook",
+            "instagram.com": "Instagram",
+            "linkedin.com": "LinkedIn",
+            "youtube.com": "YouTube"
+        }
+        for domain, platform in social_links.items():
+            link = footer.find("a", href=lambda x: x and domain in x)
+            if link:
+                social_platforms.append(platform)
+        
+        if social_platforms:
+            self.logger.info(f"✓ Found social media: {', '.join(social_platforms)} | Source: {url}")
+        
+        # Extract top companies/major clients from "Topbedrijven" section
+        footer_menus = footer.find_all("div", class_="footer-menu")
+        for menu in footer_menus:
+            menu_title = menu.find("h2", class_="heading-md")
+            if menu_title:
+                title_text = menu_title.get_text(strip=True).lower()
+                if "bedrijven" in title_text or "companies" in title_text:
+                    # Found "Topbedrijven" or "Companies" section
+                    links = menu.find_all("a")
+                    clients = []
+                    for link in links:
+                        # Extract just the company name from "Vacatures ASML" → "ASML"
+                        client_text = link.get_text(strip=True)
+                        # Remove "Vacancies" / "Vacatures" prefix
+                        client_name = re.sub(r'^(?:vacatures|vacancies)\s+', '', client_text, flags=re.IGNORECASE).strip()
+                        if client_name:
+                            clients.append(client_name)
+                    
+                    if clients:
+                        # This is a growth signal - working with major companies
+                        if not agency.growth_signals:
+                            agency.growth_signals = []
+                        
+                        # Check for Fortune 500 / enterprise clients
+                        enterprise_clients = ["DHL", "ASML", "Gemeente Amsterdam", "GVB", "Kruidvat", "Renewi"]
+                        major_count = sum(1 for client in clients if any(ec.lower() in client.lower() for ec in enterprise_clients))
+                        
+                        if major_count >= 3:
+                            if "werkt_met_fortune500_klanten" not in agency.growth_signals:
+                                agency.growth_signals.append("werkt_met_fortune500_klanten")
+                            self.logger.info(f"✓ Found {len(clients)} major client references: {', '.join(clients[:3])}... | Source: {url}")
+                    break
         
         # Extract certifications from footer images
         cert_images = footer.find_all("img", alt=True)
@@ -743,10 +913,7 @@ class OlympiaScraper(BaseAgencyScraper):
             
             try:
                 self.logger.info(f"→ Fetching offices from page {page_index}: {url}")
-                soup = self.fetch_page(url)
-                
-                # Add to evidence URLs
-                self.evidence_urls.add(url)
+                soup = self.fetch_page(url)  # Automatically adds to evidence_urls
                 
                 # Find the jobs list
                 jobs_list = soup.find("ul", class_="jobs-list")

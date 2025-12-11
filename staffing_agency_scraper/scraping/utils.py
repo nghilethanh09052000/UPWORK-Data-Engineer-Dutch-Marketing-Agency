@@ -279,6 +279,55 @@ NO_CURE_NO_PAY_KEYWORDS = [
     "resultaat geen kosten", "risk free", "gratis"
 ]
 
+# City to Province Mapping - Dutch Cities
+CITY_TO_PROVINCE = {
+    # Noord-Holland
+    "amsterdam": "Noord-Holland", "haarlem": "Noord-Holland", "zaandam": "Noord-Holland",
+    "alkmaar": "Noord-Holland", "hoorn": "Noord-Holland", "hoofddorp": "Noord-Holland",
+    "purmerend": "Noord-Holland", "beverwijk": "Noord-Holland", "hilversum": "Noord-Holland",
+    "amstelveen": "Noord-Holland", "heerhugowaard": "Noord-Holland", "velsen": "Noord-Holland",
+    # Zuid-Holland
+    "rotterdam": "Zuid-Holland", "den haag": "Zuid-Holland", "the hague": "Zuid-Holland",
+    "'s-gravenhage": "Zuid-Holland", "s-gravenhage": "Zuid-Holland",
+    "leiden": "Zuid-Holland", "dordrecht": "Zuid-Holland", "zoetermeer": "Zuid-Holland",
+    "delft": "Zuid-Holland", "alphen aan den rijn": "Zuid-Holland", "gouda": "Zuid-Holland",
+    "schiedam": "Zuid-Holland", "spijkenisse": "Zuid-Holland", "vlaardingen": "Zuid-Holland",
+    "gorinchem": "Zuid-Holland", "capelle aan den ijssel": "Zuid-Holland", "maassluis": "Zuid-Holland",
+    "nieuwegein": "Zuid-Holland", "oud-beijerland": "Zuid-Holland",
+    # Utrecht
+    "utrecht": "Utrecht", "amersfoort": "Utrecht", "veenendaal": "Utrecht",
+    "zeist": "Utrecht", "nieuwegein": "Utrecht", "woerden": "Utrecht",
+    # Noord-Brabant
+    "eindhoven": "Noord-Brabant", "tilburg": "Noord-Brabant", "breda": "Noord-Brabant",
+    "'s-hertogenbosch": "Noord-Brabant", "den bosch": "Noord-Brabant", "helmond": "Noord-Brabant",
+    "oss": "Noord-Brabant", "roosendaal": "Noord-Brabant", "bergen op zoom": "Noord-Brabant",
+    "uden": "Noord-Brabant", "veghel": "Noord-Brabant", "veldhoven": "Noord-Brabant",
+    "waalwijk": "Noord-Brabant", "oosterhout": "Noord-Brabant", "schijndel": "Noord-Brabant",
+    # Gelderland
+    "nijmegen": "Gelderland", "arnhem": "Gelderland", "apeldoorn": "Gelderland",
+    "ede": "Gelderland", "zutphen": "Gelderland", "tiel": "Gelderland",
+    "harderwijk": "Gelderland", "zaltbommel": "Gelderland", "zevenaar": "Gelderland",
+    "lichtenvoorde": "Gelderland", "doetinchem": "Gelderland", "winterswijk": "Gelderland",
+    "didam": "Gelderland", "wageningen": "Gelderland", "barneveld": "Gelderland",
+    # Limburg
+    "maastricht": "Limburg", "venlo": "Limburg", "roermond": "Limburg",
+    "heerlen": "Limburg", "sittard": "Limburg", "sittard-geleen": "Limburg",
+    # Overijssel
+    "enschede": "Overijssel", "zwolle": "Overijssel", "almelo": "Overijssel",
+    "deventer": "Overijssel", "hengelo": "Overijssel", "kampen": "Overijssel",
+    # Groningen
+    "groningen": "Groningen", "veendam": "Groningen", "hoogezand": "Groningen",
+    # Friesland
+    "leeuwarden": "Friesland", "drachten": "Friesland", "heerenveen": "Friesland",
+    "sneek": "Friesland", "franeker": "Friesland",
+    # Flevoland
+    "almere": "Flevoland", "lelystad": "Flevoland", "emmeloord": "Flevoland",
+    # Zeeland
+    "middelburg": "Zeeland", "vlissingen": "Zeeland", "goes": "Zeeland", "terneuzen": "Zeeland",
+    # Drenthe
+    "emmen": "Drenthe", "assen": "Drenthe", "hoogeveen": "Drenthe", "meppel": "Drenthe",
+}
+
 
 class AgencyScraperUtils:
     """
@@ -1521,4 +1570,26 @@ class AgencyScraperUtils:
             self.logger.info(f"✓ Found takeover fee model: scaled | Source: {url}")
         
         return result
+    
+    def map_city_to_province(self, city: str) -> Optional[str]:
+        """
+        Map a Dutch city name to its province.
+        
+        Args:
+            city: City name (case-insensitive)
+        
+        Returns:
+            Province name if found, None otherwise
+        
+        Example:
+            >>> utils.map_city_to_province("Amsterdam")
+            'Noord-Holland'
+            >>> utils.map_city_to_province("Utrecht")
+            'Utrecht'
+        """
+        if not city:
+            return None
+        
+        city_lower = city.strip().lower()
+        return CITY_TO_PROVINCE.get(city_lower)
 
