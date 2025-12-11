@@ -478,16 +478,162 @@ sectors = utils.fetch_sectors("text with logistiek, horeca, thuiswerk", "https:/
 
 ## Adding a New Agency
 
-1. Create a new directory under `staffing_agency_scraper/scraping/agencies/`:
+### Step 1: Create Directory Structure
+
 ```bash
 mkdir -p staffing_agency_scraper/scraping/agencies/new_agency
+cd staffing_agency_scraper/scraping/agencies/new_agency
+touch __init__.py assets.py definitions.py
 ```
 
-2. Create `assets.py` with the scraping logic
-3. Create `definitions.py` with Dagster definitions
-4. Register in `staffing_agency_scraper/scraping/definitions.py`
+### Step 2: Create `assets.py`
 
-See existing agencies (especially `adecco/assets.py`) for examples.
+Use the standard template with `AgencyScraperUtils`:
+
+```python
+"""
+New Agency scraper.
+
+Website: https://www.newagency.nl
+"""
+from __future__ import annotations
+
+import dagster as dg
+from bs4 import BeautifulSoup
+
+from staffing_agency_scraper.models import Agency, GeoFocusType
+from staffing_agency_scraper.scraping.base import BaseAgencyScraper
+from staffing_agency_scraper.scraping.utils import AgencyScraperUtils
+
+
+class NewAgencyScraper(BaseAgencyScraper):
+    """Scraper for New Agency."""
+
+    AGENCY_NAME = "New Agency"
+    WEBSITE_URL = "https://www.newagency.nl"
+    BRAND_GROUP = "New Agency Group"
+    
+    PAGES_TO_SCRAPE = [
+        "https://www.newagency.nl",
+        "https://www.newagency.nl/over-ons",
+        "https://www.newagency.nl/contact",
+        "https://www.newagency.nl/diensten",
+    ]
+
+    def scrape(self) -> Agency:
+        self.logger.info(f"Starting scrape of {self.AGENCY_NAME}")
+        
+        # Initialize utils for standard extractions
+        self.utils = AgencyScraperUtils(logger=self.logger)
+        
+        agency = self.create_base_agency()
+        agency.geo_focus_type = GeoFocusType.NATIONAL
+        
+        for url in self.PAGES_TO_SCRAPE:
+            try:
+                soup = self.fetch_page(url)
+                page_text = soup.get_text(separator=" ", strip=True)
+                
+                # Use utils methods for standard extractions
+                if not agency.logo_url:
+                    agency.logo_url = self.utils.fetch_logo(soup, url)
+                
+                # Sectors (normalized)
+                sectors = self.utils.fetch_sectors(page_text, url)
+                if sectors and not agency.sectors_core:
+                    agency.sectors_core = sectors
+                
+                # Portal detection
+                if self.utils.detect_candidate_portal(soup, page_text, url):
+                    agency.digital_capabilities.candidate_portal = True
+                if self.utils.detect_client_portal(soup, page_text, url):
+                    agency.digital_capabilities.client_portal = True
+                
+                # Role levels
+                role_levels = self.utils.fetch_role_levels(page_text, url)
+                if role_levels:
+                    if not agency.role_levels:
+                        agency.role_levels = []
+                    agency.role_levels.extend(role_levels)
+                    agency.role_levels = list(set(agency.role_levels))
+                
+                # Review sources
+                review_sources = self.utils.fetch_review_sources(soup, url)
+                if review_sources and not agency.review_sources:
+                    agency.review_sources = review_sources
+                
+                # Add custom extractions here...
+                
+            except Exception as e:
+                self.logger.warning(f"Error scraping {url}: {e}")
+        
+        agency.evidence_urls = list(self.evidence_urls)
+        agency.collected_at = self.collected_at
+        
+        return agency
+
+
+@dg.asset(group_name="agencies")
+def new_agency_scrape() -> dg.Output[dict]:
+    """Scrape New Agency website."""
+    scraper = NewAgencyScraper()
+    agency = scraper.scrape()
+    output_path = scraper.save_to_json(agency)
+    return dg.Output(
+        value=agency.to_json_dict(),
+        metadata={
+            "agency_name": agency.agency_name,
+            "website_url": agency.website_url,
+            "pages_scraped": len(agency.evidence_urls),
+            "output_file": output_path,
+        },
+    )
+```
+
+### Step 3: Create `definitions.py`
+
+```python
+"""Dagster definitions for New Agency scraper."""
+
+from dagster import load_assets_from_modules
+
+from . import assets
+
+new_agency_assets = load_assets_from_modules([assets])
+```
+
+### Step 4: Register in Main Definitions
+
+Add to `staffing_agency_scraper/scraping/definitions.py`:
+
+```python
+from .agencies.new_agency.definitions import new_agency_assets
+
+all_scraper_assets = [
+    # ... existing assets ...
+    *new_agency_assets,
+]
+```
+
+### Step 5: Test
+
+```bash
+uv run dagster asset materialize -m staffing_agency_scraper.definitions -a new_agency_scrape
+```
+
+Check output:
+```bash
+cat output/new_agency.json
+tail -f logs/dagster.log
+```
+
+### Examples to Follow
+
+- **Simple scraper**: `asa_talent/assets.py`, `manpower/assets.py`
+- **Complex scraper with API**: `adecco/assets.py`
+- **International agency**: `brunel/assets.py`
+
+All 69 reusable extraction methods are available in `scraping/utils.py`.
 
 ## Environment Variables
 
@@ -496,7 +642,77 @@ See existing agencies (especially `adecco/assets.py`) for examples.
 | `PIPELINE_PG_CONNSTRING` | Yes | `postgres://user:pass@host:5432/db` | PostgreSQL connection string |
 | `OUTPUT_DIR` | No | `./output` | Directory for JSON output |
 | `LOG_INVALID_ROWS` | No | `true` | Log invalid rows during parsing |
+| `DAGSTER_HOME` | No | `./dagster_home` | Dagster instance data directory |
+
+**Note**: Logging configuration is in `dagster.yaml`. Logs are written to `logs/` directory by default.
+
+## Quick Reference
+
+### Common Commands
+
+```bash
+# Development
+make dev                 # Start Dagster UI (with DB)
+make dev-no-db          # Start Dagster UI (without DB)
+make lint               # Run linter
+make test               # Run tests
+
+# Scraping
+uv run dagster asset materialize -m staffing_agency_scraper.definitions -a adecco_scrape
+uv run dagster asset materialize -m staffing_agency_scraper.definitions -a asa_talent_scrape -a brunel_scrape
+
+# Logging
+tail -f logs/dagster.log                    # View main log
+cat logs/compute_logs/*/compute.out         # View latest run
+./view_logs.sh                              # Interactive log viewer (if available)
+
+# Output
+cat output/adecco.json                      # View scraped data
+grep "role_levels" output/*.json            # Check specific fields
+ls -lh output/                              # List all scraped agencies
+```
+
+### Key Files
+
+- `dagster.yaml`: Logging configuration
+- `pyproject.toml`: Dependencies and project metadata
+- `staffing_agency_scraper/scraping/utils.py`: 69 reusable extraction methods
+- `staffing_agency_scraper/scraping/base.py`: BaseAgencyScraper class
+- `output/`: JSON output directory (gitignored)
+- `logs/`: Local log files (gitignored)
+
+### Useful Patterns
+
+**Extract sectors with normalization**:
+```python
+sectors = self.utils.fetch_sectors(page_text, url)
+# Returns only: logistiek, horeca, zorg, techniek, office, finance, etc.
+```
+
+**Detect portals**:
+```python
+if self.utils.detect_candidate_portal(soup, page_text, url):
+    agency.digital_capabilities.candidate_portal = True
+```
+
+**Extract role levels**:
+```python
+role_levels = self.utils.fetch_role_levels(page_text, url)
+# Returns: ["student", "starter", "medior", "senior"]
+```
+
+**Logo with filtering**:
+```python
+logo = self.utils.fetch_logo(soup, url)
+# Only PNG/SVG, excludes banners/hero images
+```
 
 ## License
 
 Proprietary - inhuren.nl
+
+---
+
+**Last Updated**: December 2025  
+**Client Feedback Improvements**: ✅ Implemented (5/5)  
+**Scrapers Completed**: 3/15 MVP (Adecco, ASA Talent, Brunel)
