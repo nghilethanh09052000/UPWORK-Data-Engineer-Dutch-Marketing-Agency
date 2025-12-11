@@ -31,6 +31,8 @@ class BrunelScraper(BaseAgencyScraper):
         "https://www.brunel.net/nl-nl/contact",  # Contact page - discover office URLs dynamically
         "https://www.brunel.net/nl-nl/voor-opdrachtgevers",  # For employers
         "https://www.brunel.net/nl-nl/over-ons",  # About
+        "https://www.brunel.net/nl-nl/ons-verhaal",  # History - growth signals
+        "https://www.brunel.net/nl-nl/myapplications/login",  # Candidate portal login
     ]
 
     def scrape(self) -> Agency:
@@ -266,11 +268,16 @@ class BrunelScraper(BaseAgencyScraper):
         # Extract focus segments from text
         agency.focus_segments = self._extract_focus_segments(all_text)
 
-        # Extract digital capabilities from text
-        agency.digital_capabilities = self._extract_digital_capabilities(all_text)
+        # Extract digital capabilities from text (preserve portal values set by utils)
+        digital_caps = self._extract_digital_capabilities(all_text)
+        # Only update mobile_app (portals already set by utils.detect_*_portal)
+        agency.digital_capabilities.mobile_app = digital_caps.mobile_app
 
         # Extract AI capabilities from __NEXT_DATA__ and text
         agency.ai_capabilities = self._extract_ai_capabilities(all_text, has_chatbot)
+        
+        # Extract growth signals from accumulated text
+        agency.growth_signals = self.utils.fetch_growth_signals(all_text, "accumulated_text")
 
         # Update evidence URLs
         agency.evidence_urls = self.evidence_urls.copy()
@@ -291,15 +298,74 @@ class BrunelScraper(BaseAgencyScraper):
         return agency
 
     def _extract_logo(self, soup: BeautifulSoup) -> str | None:
-        """Extract logo from header."""
+        """
+        Extract logo from __NEXT_DATA__ JSON or header.
+        
+        Brunel stores the logo in __NEXT_DATA__ JSON:
+        "navigationLogo": {
+            "image": {
+                "value": {
+                    "src": "https://edge.sitecorecloud.io/.../imagery-logo-light-brunel.png"
+                }
+            }
+        }
+        """
+        import json
+        
+        # First try to extract from __NEXT_DATA__
+        next_data_script = soup.find("script", id="__NEXT_DATA__")
+        if next_data_script and next_data_script.string:
+            try:
+                # Use regex to find navigationLogo image src (faster than parsing full JSON)
+                script_text = next_data_script.string
+                
+                # Look for navigationLogo pattern
+                logo_match = re.search(r'"navigationLogo"\s*:\s*\{[^}]*?"image"\s*:\s*\{[^}]*?"value"\s*:\s*\{[^}]*?"src"\s*:\s*"([^"]+)"', script_text, re.DOTALL)
+                if logo_match:
+                    src = logo_match.group(1)
+                    # Decode JSON escape sequences (e.g., \u0026 → &)
+                    # The URL is inside a JSON string, so we need to decode it
+                    try:
+                        # Use json.loads to properly decode the string
+                        src = json.loads(f'"{src}"')
+                    except:
+                        # If decoding fails, use the raw string
+                        pass
+                    
+                    # Filter out non-logo images (search, icons, etc.)
+                    if "logo" in src.lower() and "search" not in src.lower():
+                        self.logger.info(f"✓ Found logo from __NEXT_DATA__: {src}")
+                        return src
+                
+            except Exception as e:
+                self.logger.warning(f"Error parsing __NEXT_DATA__ for logo: {e}")
+        
+        # Fallback: Try SVG mask logo
+        span_logo = soup.find("span", role="img", attrs={"style": lambda s: s and "mask:url(" in s if s else False})
+        if span_logo:
+            style = span_logo.get("style", "")
+            mask_match = re.search(r'mask:url\(([^)]+)\)', style)
+            if mask_match:
+                src = mask_match.group(1)
+                # Filter out search.svg and other non-logo files
+                if "logo" in src.lower() and "search" not in src.lower():
+                    if not src.startswith("http"):
+                        src = f"https://www.brunel.net{src}"
+                    self.logger.info(f"✓ Found logo (SVG mask): {src}")
+                    return src
+        
+        # Fallback: Traditional img elements
         logo = soup.select_one("header img, .site-header img, [class*='logo'] img, a[aria-label*='logo'] img")
         if logo:
             src = logo.get("src") or logo.get("data-src")
             if src and not src.startswith("data:"):
-                if not src.startswith("http"):
-                    src = f"https://www.brunel.net{src}"
-                self.logger.info(f"✓ Found logo: {src}")
-                return src
+                # Filter out search icons and other non-logo images
+                if "search" not in src.lower():
+                    if not src.startswith("http"):
+                        src = f"https://www.brunel.net{src}"
+                    self.logger.info(f"✓ Found logo: {src}")
+                    return src
+        
         return None
 
     def _extract_sectors_from_opdrachtgevers(self, soup: BeautifulSoup, url: str) -> list[str]:

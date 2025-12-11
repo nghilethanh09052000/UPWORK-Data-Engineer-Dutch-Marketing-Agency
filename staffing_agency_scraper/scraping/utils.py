@@ -19,6 +19,184 @@ from staffing_agency_scraper.models import (
 )
 
 
+# ============================================================================
+# REUSABLE CONSTANTS FOR ALL AGENCIES
+# ============================================================================
+
+# Portal Detection - Candidate URL Patterns
+CANDIDATE_URL_PATTERNS = [
+    "myapplication",  # /myapplications/login
+    "my-application",
+    "mijn-account",
+    "mijn-dossier",
+    "kandidaat",
+    "candidate",
+    "medewerker",
+    "talent-portal",
+]
+
+# Portal Detection - Candidate Text Keywords
+CANDIDATE_TEXT_KEYWORDS = [
+    "candidate login",
+    "kandidaat login",
+    "kandidaat inloggen",
+    "medewerker login",
+    "medewerker inloggen",
+    "employee login",
+    "mijn account",
+    "mijn profiel",
+    "mijn dashboard",
+    "mijn dossier",
+    "mijn werknemersportaal",
+    "talent portal",
+]
+
+# Portal Detection - Candidate Link Indicators
+CANDIDATE_LINK_INDICATORS = [
+    "mijn",  # "mijn dossier", "mijn account", etc.
+    "my",  # "myapplications", "my account", etc.
+    "kandidaat",
+    "candidate",
+    "medewerker",
+    "talent",
+]
+
+# Portal Detection - Client Text Keywords
+CLIENT_TEXT_KEYWORDS = [
+    "client portal",
+    "employer portal",
+    "werkgeversportaal",
+    "opdrachtgever portal",
+    "mijn werkgevers",
+    "werkgever inloggen",
+    "employer login",
+]
+
+# Portal Detection - Employer/Client Indicators
+EMPLOYER_INDICATORS = [
+    "werkgever",
+    "employer",
+    "client",
+    "opdrachtgever",
+]
+
+# Portal Detection - Login/Portal Indicators
+PORTAL_INDICATORS = [
+    "portal",
+    "login",
+    "inloggen",
+    "dashboard",
+]
+
+# Role Levels - Detection Keywords
+ROLE_LEVEL_KEYWORDS = {
+    "student": [
+        "student",
+        "studenten",
+        "bijbaan",
+        "bijbaantje",
+        "stage",
+        "stageplek",
+    ],
+    "starter": [
+        "starter",
+        "junior",
+        "beginning",
+        "entree",
+        "startende",
+    ],
+    "medior": [
+        "medior",
+        "ervaren",
+        "experienced",
+        "mid-level",
+    ],
+    "senior": [
+        "senior",
+        "specialist",
+        "expert",
+        "lead",
+        "principal",
+        "architect",
+    ],
+}
+
+# Review Platforms - Detection Patterns
+REVIEW_PLATFORMS = {
+    "Google Reviews": ["google.com/maps", "google.nl/maps", "reviews", "beoordelingen"],
+    "Trustpilot": ["trustpilot.com", "trustpilot.nl"],
+    "Indeed": ["indeed.com", "indeed.nl", "indeed reviews"],
+    "Glassdoor": ["glassdoor.com", "glassdoor.nl"],
+}
+
+# Sector Normalization - Sector Keywords Mapping
+# Maps normalized sector names to detection keywords
+SECTOR_KEYWORDS = {
+    "logistiek": ["logistiek", "transport", "warehouse", "magazijn", "supply chain"],
+    "horeca": ["horeca", "hospitality", "restaurant", "hotel", "catering"],
+    "zorg": ["zorg", "healthcare", "care", "verpleging", "ggz", "thuiszorg"],
+    "techniek": ["techniek", "technical", "engineering", "installatie", "montage"],
+    "office": ["office", "kantoor", "administratie", "backoffice", "secretarieel"],
+    "finance": ["finance", "financieel", "accounting", "boekhouding", "treasury"],
+    "marketing": ["marketing", "communicatie", "pr", "sales", "commercieel"],
+    "retail": ["retail", "winkel", "verkoop", "winkelier"],
+    "industrie": ["industrie", "productie", "manufacturing", "fabriek"],
+    "bouw": ["bouw", "construction", "aannemer", "infrastractuur"],
+    "it": ["it", "ict", "software", "developer", "data", "cloud", "cyber"],
+    "hr": ["hr", "human resources", "recruitment", "p&o"],
+    "legal": ["legal", "juridisch", "recht", "advocatuur"],
+    "onderwijs": ["onderwijs", "education", "leraar", "docent"],
+    "publieke_sector": ["publieke sector", "overheid", "government", "gemeente", "rijk"],
+    "automotive": ["automotive", "auto", "voertuigen"],
+    "engineering": ["engineering", "ingenieur"],
+    "productie": ["productie", "production"],
+    "schoonmaak": ["schoonmaak", "cleaning", "facility"],
+    "beveiliging": ["beveiliging", "security"],
+    "callcenter": ["callcenter", "klantenservice", "customer service"],
+    "energie": ["energie", "energy", "utilities"],
+    "chemie": ["chemie", "chemical"],
+    "pharma": ["pharma", "pharmaceutical", "geneesmiddelen"],
+    "food": ["food", "voedsel", "agrifood"],
+    "agri": ["agri", "landbouw", "agriculture"],
+    "telecom": ["telecom", "telecommunicatie"],
+    "media": ["media", "broadcasting", "publishing"],
+    "consulting": ["consulting", "advisory", "advies"],
+    "non_profit": ["non profit", "non-profit", "nonprofit", "ngo", "charity"],
+    "high_tech": ["high tech", "high-tech", "hightech"],
+    "life_science": ["life science", "life sciences", "biotech"],
+    "bouw_infra": ["bouw & infra", "infrastructuur"],
+    "it_telecom": ["it & telecom", "ict"],
+}
+
+# List of normalized sectors (for reference)
+NORMALIZED_SECTORS = list(SECTOR_KEYWORDS.keys())
+
+# Growth Signals - Detection Keywords
+GROWTH_SIGNAL_KEYWORDS = {
+    "landelijke_dekking": [
+        "landelijk", "landelijke dekking", "heel nederland",
+        "national coverage", "nationwide"
+    ],
+    "internationale_groep": [
+        "internationale groep", "international group",
+        "wereldwijd", "worldwide", "global presence",
+        "landen", "countries",
+    ],
+    "beursgenoteerd": [
+        "beursgenoteerd", "nyse", "euronext", "beurs", "stock exchange",
+        "listed", "public company", "ticker"
+    ],
+    "overnames": [
+        "overname", "acquisitie", "acquisition", "overgenomen",
+        "acquired", "fusie", "merger"
+    ],
+    "awards": [
+        "award", "prijs", "winnaar", "winner", "erkend",
+        "recognised", "certified", "gold", "platinum"
+    ],
+}
+
+
 class AgencyScraperUtils:
     """
     Utility class with reusable extraction methods for all agencies.
@@ -77,26 +255,81 @@ class AgencyScraperUtils:
         return None
     
     def fetch_kvk_number(self, text: str, url: str) -> Optional[str]:
-        """Extract KvK (Chamber of Commerce) number."""
-        kvk_match = re.search(r'(?:KvK|kvk|chamber of commerce)[\s\-:]*(\d{8})', text, re.IGNORECASE)
-        if kvk_match:
-            kvk = kvk_match.group(1)
-            self.logger.info(f"✓ Found KvK: {kvk} | Source: {url}")
-            return kvk
+        """
+        Extract KvK (Chamber of Commerce) number.
+        
+        Supports various formats found in privacy policies, terms, and legal pages:
+        - KvK nummer: 12345678
+        - KvK-nummer: 12345678
+        - K.v.K.: 12345678
+        - Handelsregister nummer: 12345678
+        - Ingeschreven onder nummer: 12345678
+        - Chamber of Commerce: 12345678
+        """
+        # Common Dutch KvK patterns
+        patterns = [
+            # Standard formats with keyword
+            r'(?:KvK|K\.?v\.?K\.?|kvk)[\s\-:]*(?:nummer)?[\s\-:]*(\d{8})',
+            r'(?:Handelsregister|handelsregister)[\s\-:]*(?:nummer)?[\s\-:]*(\d{8})',
+            r'(?:ingeschreven|registered)[\s\w]*(?:onder|with)[\s\w]*(?:nummer|number)[\s\-:]*(\d{8})',
+            r'(?:chamber of commerce|kamer van koophandel)[\s\-:]*(?:number|nummer)?[\s\-:]*(\d{8})',
+            r'(?:trade register|handelsregister)[\s\-:]*(?:number|nummer)?[\s\-:]*(\d{8})',
+            # Registration number (as one word or two words) - common in terms/privacy pages
+            r'(?:registratie[\s\-]?nummer|registration[\s\-]?number)[\s\-:]*(\d{8})',
+            # Format with dots (e.g., 12.34.56.78)
+            r'(?:KvK|K\.?v\.?K\.?|kvk)[\s\-:]*(?:nummer)?[\s\-:]*(\d{2}[\.\s]?\d{2}[\.\s]?\d{2}[\.\s]?\d{2})',
+            # Standalone 8-digit number after specific context
+            r'(?:geregistreerd|registered)[\s\w,]*(?:B\.?V\.?|N\.?V\.?)[\s\w,]*(?:onder|with)[\s\w]*(\d{8})',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                kvk = match.group(1)
+                # Remove dots and spaces if present (e.g., 12.34.56.78 → 12345678)
+                kvk_clean = re.sub(r'[\.\s]', '', kvk)
+                # Verify it's exactly 8 digits
+                if len(kvk_clean) == 8 and kvk_clean.isdigit():
+                    self.logger.info(f"✓ Found KvK: {kvk_clean} | Source: {url}")
+                    return kvk_clean
+        
         return None
     
     def fetch_legal_name(self, text: str, agency_name: str, url: str) -> Optional[str]:
-        """Extract legal name (e.g., 'Company B.V.')."""
-        # Generic pattern for Dutch legal entities
+        """
+        Extract legal name (e.g., 'Hays B.V.', 'Brunel International N.V.').
+        
+        Supports various Dutch/international legal entity formats found in:
+        - Privacy policies
+        - Terms and conditions
+        - About pages
+        - Footer sections
+        """
+        # Escape agency_name for regex (in case it contains special chars)
+        escaped_name = re.escape(agency_name)
+        
+        # Pattern for Dutch legal entities with various formats
         patterns = [
-            rf"({agency_name}\s+(?:\w+\s+)?B\.?V\.?)",
-            rf"({agency_name}\s+(?:Nederland|Netherlands)\s+B\.?V\.?)",
+            # Standard B.V. formats
+            rf"({escaped_name}\s+(?:\w+\s+)?B\.?V\.?)",
+            rf"({escaped_name}\s+(?:Nederland|Netherlands|International|Global|Group)?\s*B\.?V\.?)",
+            # N.V. formats (public companies)
+            rf"({escaped_name}\s+(?:\w+\s+)?N\.?V\.?)",
+            rf"({escaped_name}\s+(?:Nederland|Netherlands|International|Global|Group)?\s*N\.?V\.?)",
+            # Other formats
+            rf"({escaped_name}\s+(?:plc|PLC|Ltd|Limited|GmbH|AG))",
+            # With location prefix (e.g., "Hays Nederland B.V.")
+            rf"({escaped_name}\s+(?:Nederland|Netherlands)\s+B\.?V\.?)",
+            # Relaxed pattern for any company suffix after agency name
+            rf"({escaped_name}[\s\w]*?(?:B\.?V\.?|N\.?V\.?|plc|PLC))",
         ]
         
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 legal_name = match.group(1).strip()
+                # Clean up extra whitespace
+                legal_name = re.sub(r'\s+', ' ', legal_name)
                 self.logger.info(f"✓ Found legal_name: {legal_name} | Source: {url}")
                 return legal_name
         
@@ -176,26 +409,8 @@ class AgencyScraperUtils:
         text_lower = text.lower()
         sectors = []
         
-        # Normalized sector list from client
-        sector_keywords = {
-            "logistiek": ["logistiek", "transport", "warehouse", "magazijn"],
-            "horeca": ["horeca", "hospitality", "restaurant", "hotel"],
-            "zorg": ["zorg", "healthcare", "care", "verpleging", "ggz"],
-            "techniek": ["techniek", "technical", "engineering", "installatie"],
-            "office": ["office", "kantoor", "administratie", "backoffice"],
-            "finance": ["finance", "financieel", "accounting", "boekhouding"],
-            "marketing": ["marketing", "communicatie", "pr", "sales"],
-            "retail": ["retail", "winkel", "verkoop"],
-            "industrie": ["industrie", "productie", "manufacturing"],
-            "bouw": ["bouw", "construction", "aannemer"],
-            "it": ["it", "ict", "software", "developer", "data"],
-            "hr": ["hr", "human resources", "recruitment"],
-            "legal": ["legal", "juridisch", "recht"],
-            "onderwijs": ["onderwijs", "education", "leraar", "docent"],
-            "overheid": ["overheid", "government", "publieke sector"],
-        }
-        
-        for sector, keywords in sector_keywords.items():
+        # Use the global SECTOR_KEYWORDS mapping
+        for sector, keywords in SECTOR_KEYWORDS.items():
             for keyword in keywords:
                 if keyword in text_lower and sector not in sectors:
                     sectors.append(sector)
@@ -327,41 +542,36 @@ class AgencyScraperUtils:
         """
         Detect candidate/employee portal.
         
-        Client requirement: Look for "login", "inloggen", "mijn..." dashboards.
+        Client requirement: Look for specific candidate login indicators.
+        Note: Generic "login" is too vague - we need specific evidence.
         """
         text_lower = text.lower()
+        url_lower = url.lower()
         
-        # Check for login-related text
-        if any(keyword in text_lower for keyword in [
-            "inloggen",
-            "login",
-            "mijn account",
-            "mijn profiel",
-            "mijn dashboard",
-            "candidate login",
-            "kandidaat login",
-            "medewerker login",
-            "employee login",
-            "mijn werknemersportaal",
-        ]):
+        # FIRST: Check the current URL itself for candidate indicators
+        # (Important: When we're ON the login page, there's no link TO it!)
+        for pattern in CANDIDATE_URL_PATTERNS:
+            if pattern in url_lower:
+                # Make sure it's not an employer portal
+                if not any(x in url_lower for x in EMPLOYER_INDICATORS):
+                    self.logger.info(f"✓ Found candidate_portal (URL pattern: {pattern} in {url}) | Source: {url}")
+                    return True
+        
+        # Check for candidate-specific portal keywords
+        if any(keyword in text_lower for keyword in CANDIDATE_TEXT_KEYWORDS):
             self.logger.info(f"✓ Found candidate_portal (text match) | Source: {url}")
             return True
         
-        # Check for login links in navigation
+        # Check for candidate-specific login links
+        # Look for "mijn"/"my" patterns in URLs and link text
         for link in soup.find_all("a", href=True):
             href = link.get("href", "").lower()
             link_text = link.get_text(strip=True).lower()
             
-            if any(keyword in href or keyword in link_text for keyword in [
-                "login",
-                "inloggen",
-                "mijn",
-                "portal",
-                "account",
-            ]):
+            if any(indicator in href or indicator in link_text for indicator in CANDIDATE_LINK_INDICATORS):
                 # Exclude employer/client portals
-                if not any(x in href or x in link_text for x in ["werkgever", "employer", "client", "opdrachtgever"]):
-                    self.logger.info(f"✓ Found candidate_portal (link: {link_text}) | Source: {url}")
+                if not any(x in href or x in link_text for x in EMPLOYER_INDICATORS):
+                    self.logger.info(f"✓ Found candidate_portal (link: {link_text} → {link.get('href', '')}) | Source: {url}")
                     return True
         
         return False
@@ -375,29 +585,25 @@ class AgencyScraperUtils:
         text_lower = text.lower()
         
         # Check for employer/client-specific text
-        if any(keyword in text_lower for keyword in [
-            "client portal",
-            "employer portal",
-            "werkgeversportaal",
-            "opdrachtgever portal",
-            "mijn werkgevers",
-            "werkgever inloggen",
-            "employer login",
-        ]):
+        if any(keyword in text_lower for keyword in CLIENT_TEXT_KEYWORDS):
             self.logger.info(f"✓ Found client_portal (text match) | Source: {url}")
             return True
         
         # Check for employer login links
+        # Note: Must have BOTH employer indicator AND login/portal indicator!
         for link in soup.find_all("a", href=True):
             href = link.get("href", "").lower()
             link_text = link.get_text(strip=True).lower()
             
-            if any(keyword in href or keyword in link_text for keyword in [
-                "werkgever",
-                "employer",
-                "client portal",
-                "opdrachtgever",
-            ]):
+            # Employer/client indicators
+            has_employer = any(keyword in href or keyword in link_text for keyword in EMPLOYER_INDICATORS)
+            
+            # Login/portal indicators
+            has_portal = any(keyword in href or keyword in link_text for keyword in PORTAL_INDICATORS)
+            
+            # Only detect if BOTH are present
+            # (Avoids false positives from "Voor Opdrachtgevers" pages)
+            if has_employer and has_portal:
                 self.logger.info(f"✓ Found client_portal (link: {link_text}) | Source: {url}")
                 return True
         
@@ -417,50 +623,12 @@ class AgencyScraperUtils:
         text_lower = text.lower()
         levels = []
         
-        # Student detection
-        if any(keyword in text_lower for keyword in [
-            "student",
-            "studenten",
-            "bijbaan",
-            "bijbaantje",
-            "stage",
-            "stageplek",
-        ]):
-            levels.append("student")
-            self.logger.info(f"✓ Found role_level: student | Source: {url}")
-        
-        # Starter/Junior detection
-        if any(keyword in text_lower for keyword in [
-            "starter",
-            "junior",
-            "beginning",
-            "entree",
-            "startende",
-        ]):
-            levels.append("starter")
-            self.logger.info(f"✓ Found role_level: starter | Source: {url}")
-        
-        # Medior detection
-        if any(keyword in text_lower for keyword in [
-            "medior",
-            "ervaren",
-            "experienced",
-            "mid-level",
-        ]):
-            levels.append("medior")
-            self.logger.info(f"✓ Found role_level: medior | Source: {url}")
-        
-        # Senior detection
-        if any(keyword in text_lower for keyword in [
-            "senior",
-            "specialist",
-            "expert",
-            "lead",
-            "principal",
-            "architect",
-        ]):
-            levels.append("senior")
-            self.logger.info(f"✓ Found role_level: senior | Source: {url}")
+        # Check each role level using the constants
+        for level, keywords in ROLE_LEVEL_KEYWORDS.items():
+            if any(keyword in text_lower for keyword in keywords):
+     
+                levels.append(level)
+                self.logger.info(f"✓ Found role_level: {level} | Source: {url}")
         
         return list(set(levels))  # Remove duplicates
     
@@ -477,20 +645,12 @@ class AgencyScraperUtils:
         """
         review_sources = []
         
-        # Review platform patterns
-        platforms = {
-            "Google Reviews": ["google.com/maps", "google.nl/maps", "reviews", "beoordelingen"],
-            "Trustpilot": ["trustpilot.com", "trustpilot.nl"],
-            "Indeed": ["indeed.com", "indeed.nl", "indeed reviews"],
-            "Glassdoor": ["glassdoor.com", "glassdoor.nl"],
-        }
-        
         # Check all links in footer and body
         for link in soup.find_all("a", href=True):
             href = link.get("href", "")
             link_text = link.get_text(strip=True).lower()
             
-            for platform, keywords in platforms.items():
+            for platform, keywords in REVIEW_PLATFORMS.items():
                 # Check if URL matches platform
                 if any(keyword in href.lower() for keyword in keywords):
                     # Check if it's a review link (not just homepage)
@@ -511,4 +671,87 @@ class AgencyScraperUtils:
                 unique_sources.append(source)
         
         return unique_sources
+    
+    # ========================================================================
+    # GROWTH SIGNALS
+    # ========================================================================
+    
+    def fetch_growth_signals(self, text: str, url: str) -> List[str]:
+        """
+        Extract growth signals from text (history, about pages).
+        
+        Detects factual claims like:
+        - National/regional coverage
+        - Years active (founding date)
+        - Part of international group
+        - Listed on stock exchange
+        - Number of offices/locations
+        - Acquisitions/mergers
+        - International presence
+        """
+        text_lower = text.lower()
+        signals = []
+        
+        # National coverage
+        if any(keyword in text_lower for keyword in GROWTH_SIGNAL_KEYWORDS["landelijke_dekking"]):
+            signals.append("landelijke_dekking")
+            self.logger.info(f"✓ Found growth signal: landelijke_dekking | Source: {url}")
+        
+        # International presence
+        if any(keyword in text_lower for keyword in GROWTH_SIGNAL_KEYWORDS["internationale_groep"]):
+            signals.append("onderdeel_van_internationale_groep")
+            self.logger.info(f"✓ Found growth signal: onderdeel_van_internationale_groep | Source: {url}")
+        
+        # Years active - look for founding years (1900-2024)
+        founding_match = re.search(r'\b(19\d{2}|20[0-2]\d)\b', text)
+        if founding_match:
+            year = founding_match.group(1)
+            # Only consider as founding year if mentioned with context like "sinds", "opgericht", "founded"
+            if any(keyword in text_lower for keyword in [
+                f"sinds {year}", f"in {year}", f"opgericht {year}",
+                f"founded {year}", f"established {year}"
+            ]):
+                signals.append(f"sinds_{year}_actief")
+                self.logger.info(f"✓ Found growth signal: sinds_{year}_actief | Source: {url}")
+        
+        # Stock exchange listing
+        if any(keyword in text_lower for keyword in GROWTH_SIGNAL_KEYWORDS["beursgenoteerd"]):
+            signals.append("beursgenoteerd")
+            self.logger.info(f"✓ Found growth signal: beursgenoteerd | Source: {url}")
+        
+        # Large office network
+        office_match = re.search(r'(\d+)\s*(?:kantoren|kantoor|offices|office)', text_lower)
+        if office_match:
+            count = int(office_match.group(1))
+            if count >= 10:
+                signals.append(f"{count}_plus_kantoren")
+                self.logger.info(f"✓ Found growth signal: {count}_plus_kantoren | Source: {url}")
+        
+        # Acquisitions
+        if any(keyword in text_lower for keyword in GROWTH_SIGNAL_KEYWORDS["overnames"]):
+            signals.append("overnames_gedaan")
+            self.logger.info(f"✓ Found growth signal: overnames_gedaan | Source: {url}")
+        
+        # International offices
+        country_match = re.search(r'(\d+)\s*(?:landen|countries)', text_lower)
+        if country_match:
+            count = int(country_match.group(1))
+            if count >= 5:
+                signals.append(f"actief_in_{count}_landen")
+                self.logger.info(f"✓ Found growth signal: actief_in_{count}_landen | Source: {url}")
+        
+        # Awards and certifications (growth indicator)
+        if any(keyword in text_lower for keyword in GROWTH_SIGNAL_KEYWORDS["awards"]):
+            signals.append("awards_ontvangen")
+            self.logger.info(f"✓ Found growth signal: awards_ontvangen | Source: {url}")
+        
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_signals = []
+        for signal in signals:
+            if signal not in seen:
+                seen.add(signal)
+                unique_signals.append(signal)
+        
+        return unique_signals
 

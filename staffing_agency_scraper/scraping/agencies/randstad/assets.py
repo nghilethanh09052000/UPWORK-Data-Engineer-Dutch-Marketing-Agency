@@ -124,7 +124,7 @@ class RandstadScraper(BaseAgencyScraper):
         functions: List[str],
         soup: BeautifulSoup,
         page_text: str,
-        all_sectors: Set[str],
+        all_sectors,
         url: str,
     ) -> None:
         """Apply BS4/regex extraction functions."""
@@ -168,4 +168,20 @@ class RandstadScraper(BaseAgencyScraper):
                         if any(kw in text.lower() for kw in ["logistiek", "zorg", "horeca", "retail", "productie", "administratie", "techniek", "bouw", "it"]):
                             all_sectors.add(text)
                             self.logger.info(f"✓ Found sector: '{text}' | Source: {url}")
-    
+
+
+@dg.asset(group_name="agencies")
+def randstad_scrape() -> dg.Output[dict]:
+    """Scrape Randstad Netherlands website."""
+    scraper = RandstadScraper()
+    agency = scraper.scrape()
+    output_path = scraper.save_to_json(agency)
+    return dg.Output(
+        value=agency.to_json_dict(),
+        metadata={
+            "agency_name": agency.agency_name,
+            "website_url": agency.website_url,
+            "pages_scraped": len(agency.evidence_urls),
+            "output_file": output_path,
+        },
+    )
