@@ -709,10 +709,9 @@ class AgencyScraperUtils:
         # Check each role level using the constants
         for level, keywords in ROLE_LEVEL_KEYWORDS.items():
             if any(keyword in text_lower for keyword in keywords):
-     
                 levels.append(level)
                 self.logger.info(f"✓ Found role_level: {level} | Source: {url}")
-        
+                self.logger.info(f"Text: {text_lower}")
         return list(set(levels))  # Remove duplicates
     
     # ========================================================================
@@ -858,6 +857,7 @@ class AgencyScraperUtils:
                 # print('text', text_lower)
                 size_fits.append(size_category)
                 self.logger.info(f"✓ Found company size fit: {size_category} | Source: {url}")
+                self.logger.info(f"Text: {text_lower}")
         
         return list(set(size_fits))  # Remove duplicates
     
@@ -901,6 +901,7 @@ class AgencyScraperUtils:
             if any(keyword in text_lower for keyword in keywords):
                 segments.append(segment)
                 self.logger.info(f"✓ Found focus segment: {segment} | Source: {url}")
+                self.logger.info(f'Text: {text_lower}')
         
         return list(set(segments))  # Remove duplicates
     

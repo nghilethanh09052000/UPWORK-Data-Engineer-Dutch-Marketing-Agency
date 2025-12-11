@@ -75,7 +75,7 @@ class MaandagScraper(BaseAgencyScraper):
         # Note: self.utils is now initialized in BaseAgencyScraper.__init__()
         agency = self.create_base_agency()
         agency.geo_focus_type = GeoFocusType.NATIONAL
-        agency.employers_page_url = f"{self.WEBSITE_URL}/werkgevers"
+        # Maandag doesn't have a dedicated employers page
         agency.contact_form_url = f"{self.WEBSITE_URL}/contact"
         
         # Known facts
