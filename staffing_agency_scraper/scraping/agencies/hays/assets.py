@@ -140,6 +140,67 @@ class HaysScraper(BaseAgencyScraper):
         
         # Extract growth signals
         agency.growth_signals = self.utils.fetch_growth_signals(all_text, "accumulated_text")
+        
+        # Extract company size fit
+        if not agency.company_size_fit:
+            agency.company_size_fit = self.utils.fetch_company_size_fit(all_text, "accumulated_text")
+        
+        # Extract customer segments
+        if not agency.customer_segments:
+            agency.customer_segments = self.utils.fetch_customer_segments(all_text, "accumulated_text")
+        
+        # Extract shift types
+        if not agency.shift_types_supported:
+            agency.shift_types_supported = self.utils.fetch_shift_types_supported(all_text, "accumulated_text")
+        
+        # Extract typical use cases
+        if not agency.typical_use_cases:
+            agency.typical_use_cases = self.utils.fetch_typical_use_cases(all_text, "accumulated_text")
+        
+        # Extract speed claims
+        if not agency.speed_claims:
+            agency.speed_claims = self.utils.fetch_speed_claims(all_text, "accumulated_text")
+        
+        # Extract pricing & commercial fields
+        if agency.pricing_model == "unknown":
+            agency.pricing_model = self.utils.fetch_pricing_model(all_text, "accumulated_text")
+        
+        if not agency.pricing_transparency:
+            agency.pricing_transparency = self.utils.fetch_pricing_transparency(all_text, "accumulated_text")
+        
+        if agency.no_cure_no_pay is None:
+            agency.no_cure_no_pay = self.utils.fetch_no_cure_no_pay(all_text, "accumulated_text")
+        
+        if not agency.omrekenfactor_min and not agency.omrekenfactor_max:
+            omrekenfactor_min, omrekenfactor_max = self.utils.fetch_omrekenfactor(all_text, "accumulated_text")
+            if omrekenfactor_min:
+                agency.omrekenfactor_min = omrekenfactor_min
+            if omrekenfactor_max:
+                agency.omrekenfactor_max = omrekenfactor_max
+        
+        # Extract performance metrics
+        if not agency.avg_time_to_fill_days:
+            agency.avg_time_to_fill_days = self.utils.fetch_avg_time_to_fill(all_text, "accumulated_text")
+        
+        if not agency.candidate_pool_size_estimate:
+            agency.candidate_pool_size_estimate = self.utils.fetch_candidate_pool_size(all_text, "accumulated_text")
+        
+        if not agency.annual_placements_estimate:
+            agency.annual_placements_estimate = self.utils.fetch_annual_placements(all_text, "accumulated_text")
+        
+        # Extract legal/compliance fields
+        if agency.uses_inlenersbeloning is None:
+            agency.uses_inlenersbeloning = self.utils.fetch_uses_inlenersbeloning(all_text, "accumulated_text")
+        
+        if agency.applies_inlenersbeloning_from_day1 is None:
+            agency.applies_inlenersbeloning_from_day1 = self.utils.fetch_applies_inlenersbeloning_from_day1(all_text, "accumulated_text")
+        
+        # Extract assignment conditions
+        if not agency.min_assignment_duration_weeks:
+            agency.min_assignment_duration_weeks = self.utils.fetch_min_assignment_duration(all_text, "accumulated_text")
+        
+        if not agency.min_hours_per_week:
+            agency.min_hours_per_week = self.utils.fetch_min_hours_per_week(all_text, "accumulated_text")
 
         # Update evidence URLs
         agency.evidence_urls = list(self.evidence_urls)

@@ -196,6 +196,89 @@ GROWTH_SIGNAL_KEYWORDS = {
     ],
 }
 
+# Company Size Fit - Detection Keywords
+COMPANY_SIZE_FIT_KEYWORDS = {
+    "micro_1_10": [
+        "zzp", "freelance", "eenmanszaak", "startups", "micro bedrijf", 
+        "mkb", "kleine bedrijven", "zelfstandig", "1-10 medewerkers"
+    ],
+    "smb_11_200": [
+        "mkb", "midden", "klein", "middelgroot bedrijf", "11-200 medewerkers",
+        "familiebedrijf", "sme", "small medium"
+    ],
+    "mid_market_201_1000": [
+        "middelgroot", "mid market", "201-1000", "groeiende organisaties",
+        "mid-size", "scale-up"
+    ],
+    "enterprise_1000_plus": [
+        "grootbedrijf", "enterprise", "multinational", "corporate", 
+        "1000+ medewerkers", "internationale organisaties", "groot", "Fortune"
+    ],
+    "public_sector": [
+        "overheid", "publieke sector", "gemeente", "provincie", "rijk",
+        "ministerie", "publiek", "government", "public sector", "zorg",
+        "onderwijs", "gemeenten"
+    ],
+}
+
+# Customer Segments - Detection Keywords
+CUSTOMER_SEGMENTS_KEYWORDS = {
+    "MKB": ["mkb", "midden- en kleinbedrijf", "kleine bedrijven", "middelgroot"],
+    "grootbedrijf": ["grootbedrijf", "groot bedrijf", "grote bedrijven", "enterprise"],
+    "overheid": ["overheid", "publieke sector", "gemeente", "provincie", "rijk"],
+    "zorginstelling": ["zorginstelling", "zorg", "ziekenhuis", "verpleeghuis", "ggz"],
+    "onderwijsinstelling": ["onderwijs", "school", "universiteit", "hogeschool", "mbo"],
+}
+
+# Focus Segments - Detection Keywords
+FOCUS_SEGMENTS_KEYWORDS = {
+    "studenten": ["student", "studenten", "bijbaan", "studiebaan"],
+    "young_professionals": ["young professional", "starter", "recent graduate", "hbo", "wo"],
+    "blue_collar": ["logistiek", "productie", "bouw", "technisch", "magazijn", "chauffeur"],
+    "white_collar": ["kantoor", "administratie", "finance", "hr", "sales", "marketing"],
+    "technisch_specialisten": ["specialist", "engineer", "technisch", "ict", "software"],
+    "zorgprofessionals": ["verpleegkundige", "arts", "zorgmedewerker", "zorg"],
+}
+
+# Shift Types - Detection Keywords
+SHIFT_TYPES_KEYWORDS = {
+    "dagdienst": ["dagdienst", "overdag", "kantooruren"],
+    "avonddienst": ["avonddienst", "avond"],
+    "nachtdienst": ["nachtdienst", "nacht"],
+    "weekend": ["weekend", "zaterd", "zond"],
+    "24_7_bereikbaar": ["24/7", "dag en nacht", "altijd bereikbaar", "24 uur"],
+}
+
+# Typical Use Cases - Detection Keywords
+TYPICAL_USE_CASES_KEYWORDS = {
+    "piekdruk_opvangen": ["piekdruk", "drukke periode", "piekmomenten", "seizoen"],
+    "langdurige_detachering": ["langdurig", "vast", "permanent", "structureel"],
+    "projecten": ["project", "projectbasis", "tijdelijk project"],
+    "seizoenswerk": ["seizoen", "seizoenswerk", "zomer", "kerst"],
+    "weekenddiensten": ["weekend", "zaterd", "zond"],
+    "24_7_bezetting": ["24/7", "continu", "dag en nacht", "altijd bezet"],
+}
+
+# Speed Claims - Detection Keywords
+SPEED_CLAIMS_KEYWORDS = {
+    "binnen_24_uur_kandidaten": ["24 uur", "binnen een dag", "morgen"],
+    "snel_schakelen": ["snel", "direct", "vandaag nog", "meteen"],
+    "grote_pools_direct_beschikbaar": ["directe beschikbaarheid", "groot bestand", "pool", "database"],
+}
+
+# Pricing Model - Detection Keywords
+PRICING_MODEL_KEYWORDS = {
+    "omrekenfactor": ["omrekenfactor", "multiplicator", "markup"],
+    "fixed_margin": ["vaste marge", "fixed margin", "percentage"],
+    "fixed_fee": ["vast tarief", "fixed fee", "all-in"],
+}
+
+# No Cure No Pay - Detection Keywords
+NO_CURE_NO_PAY_KEYWORDS = [
+    "no cure no pay", "geen resultaat geen betaling", "no cure, no pay",
+    "resultaat geen kosten", "risk free", "gratis"
+]
+
 
 class AgencyScraperUtils:
     """
@@ -754,4 +837,434 @@ class AgencyScraperUtils:
                 unique_signals.append(signal)
         
         return unique_signals
+    
+    def fetch_company_size_fit(self, text: str, url: str) -> List[str]:
+        """
+        Extract company size fit categories from text.
+        
+        Returns list of company size categories:
+        - micro_1_10
+        - smb_11_200
+        - mid_market_201_1000
+        - enterprise_1000_plus
+        - public_sector
+        """
+        text_lower = text.lower()
+        size_fits = []
+        
+        for size_category, keywords in COMPANY_SIZE_FIT_KEYWORDS.items():
+            if any(keyword in text_lower for keyword in keywords):
+                # print(f"Found company size fit: {size_category} | Source: {url}")
+                # print('text', text_lower)
+                size_fits.append(size_category)
+                self.logger.info(f"✓ Found company size fit: {size_category} | Source: {url}")
+        
+        return list(set(size_fits))  # Remove duplicates
+    
+    def fetch_customer_segments(self, text: str, url: str) -> List[str]:
+        """
+        Extract customer segment categories from text.
+        
+        Returns list of customer segments:
+        - MKB
+        - grootbedrijf
+        - overheid
+        - zorginstelling
+        - onderwijsinstelling
+        """
+        text_lower = text.lower()
+        segments = []
+        
+        for segment, keywords in CUSTOMER_SEGMENTS_KEYWORDS.items():
+            if any(keyword in text_lower for keyword in keywords):
+                segments.append(segment)
+                self.logger.info(f"✓ Found customer segment: {segment} | Source: {url}")
+        
+        return list(set(segments))  # Remove duplicates
+    
+    def fetch_focus_segments(self, text: str, url: str) -> List[str]:
+        """
+        Extract focus segment categories from text.
+        
+        Returns list of focus segments:
+        - studenten
+        - young_professionals
+        - blue_collar
+        - white_collar
+        - technisch_specialisten
+        - zorgprofessionals
+        """
+        text_lower = text.lower()
+        segments = []
+        
+        for segment, keywords in FOCUS_SEGMENTS_KEYWORDS.items():
+            if any(keyword in text_lower for keyword in keywords):
+                segments.append(segment)
+                self.logger.info(f"✓ Found focus segment: {segment} | Source: {url}")
+        
+        return list(set(segments))  # Remove duplicates
+    
+    def fetch_shift_types_supported(self, text: str, url: str) -> List[str]:
+        """
+        Extract shift types supported from text.
+        
+        Returns list of shift types:
+        - dagdienst
+        - avonddienst
+        - nachtdienst
+        - weekend
+        - 24_7_bereikbaar
+        """
+        text_lower = text.lower()
+        shift_types = []
+        
+        for shift_type, keywords in SHIFT_TYPES_KEYWORDS.items():
+            if any(keyword in text_lower for keyword in keywords):
+                shift_types.append(shift_type)
+                self.logger.info(f"✓ Found shift type: {shift_type} | Source: {url}")
+        
+        return list(set(shift_types))  # Remove duplicates
+    
+    def fetch_typical_use_cases(self, text: str, url: str) -> List[str]:
+        """
+        Extract typical use cases from text.
+        
+        Returns list of use cases:
+        - piekdruk_opvangen
+        - langdurige_detachering
+        - projecten
+        - seizoenswerk
+        - weekenddiensten
+        - 24_7_bezetting
+        """
+        text_lower = text.lower()
+        use_cases = []
+        
+        for use_case, keywords in TYPICAL_USE_CASES_KEYWORDS.items():
+            if any(keyword in text_lower for keyword in keywords):
+                use_cases.append(use_case)
+                self.logger.info(f"✓ Found typical use case: {use_case} | Source: {url}")
+        
+        return list(set(use_cases))  # Remove duplicates
+    
+    def fetch_speed_claims(self, text: str, url: str) -> List[str]:
+        """
+        Extract speed claims from text.
+        
+        Returns list of speed claims:
+        - binnen_24_uur_kandidaten
+        - snel_schakelen
+        - grote_pools_direct_beschikbaar
+        """
+        text_lower = text.lower()
+        speed_claims = []
+        
+        for claim, keywords in SPEED_CLAIMS_KEYWORDS.items():
+            if any(keyword in text_lower for keyword in keywords):
+                speed_claims.append(claim)
+                self.logger.info(f"✓ Found speed claim: {claim} | Source: {url}")
+        
+        return list(set(speed_claims))  # Remove duplicates
+    
+    def fetch_volume_specialisation(self, text: str, url: str) -> str:
+        """
+        Infer volume specialisation from text.
+        
+        Returns one of:
+        - ad_hoc_1_5: Ad-hoc placements (1-5 people)
+        - pools_5_50: Pool management (5-50 people)
+        - massa_50_plus: Mass recruitment (50+ people)
+        - unknown
+        """
+        text_lower = text.lower()
+        
+        # Check for mass recruitment indicators
+        if any(keyword in text_lower for keyword in [
+            "massa", "hoog volume", "100+", "grote aantallen", "bulk",
+            "seizoen", "piek", "grootschalig"
+        ]):
+            self.logger.info(f"✓ Found volume specialisation: massa_50_plus | Source: {url}")
+            return "massa_50_plus"
+        
+        # Check for pool management indicators
+        if any(keyword in text_lower for keyword in [
+            "pool", "flexpool", "bestand", "database", "50 kandidaten",
+            "talent pool", "candidate pool"
+        ]):
+            self.logger.info(f"✓ Found volume specialisation: pools_5_50 | Source: {url}")
+            return "pools_5_50"
+        
+        # Check for ad-hoc/small scale indicators
+        if any(keyword in text_lower for keyword in [
+            "maatwerk", "bespoke", "specialist", "exact match", "1-op-1",
+            "individueel", "niche"
+        ]):
+            self.logger.info(f"✓ Found volume specialisation: ad_hoc_1_5 | Source: {url}")
+            return "ad_hoc_1_5"
+        
+        return "unknown"
+    
+    def fetch_pricing_model(self, text: str, url: str) -> str:
+        """
+        Extract pricing model from text.
+        
+        Returns one of:
+        - omrekenfactor
+        - fixed_margin
+        - fixed_fee
+        - unknown
+        """
+        text_lower = text.lower()
+        
+        for model, keywords in PRICING_MODEL_KEYWORDS.items():
+            if any(keyword in text_lower for keyword in keywords):
+                self.logger.info(f"✓ Found pricing model: {model} | Source: {url}")
+                return model
+        
+        return "unknown"
+    
+    def fetch_pricing_transparency(self, text: str, url: str) -> Optional[str]:
+        """
+        Extract pricing transparency level from text.
+        
+        Returns one of:
+        - public_examples: Public pricing examples available
+        - explainer_only: Explanation of pricing model without examples
+        - quote_only: Contact for quote only
+        - None: No pricing information found
+        """
+        text_lower = text.lower()
+        
+        # Check for public pricing examples (tariff tables, rate cards, etc.)
+        if any(keyword in text_lower for keyword in [
+            "tarief", "uurtarief", "voorbeeld", "vanaf €", "€ per uur",
+            "rate card", "pricing example", "kosten per", "tarievenlijst"
+        ]):
+            self.logger.info(f"✓ Found pricing transparency: public_examples | Source: {url}")
+            return "public_examples"
+        
+        # Check for pricing model explanation
+        if any(keyword in text_lower for keyword in [
+            "omrekenfactor", "pricing model", "kostenmodel", "hoe werkt",
+            "tariefstructuur", "prijsopbouw"
+        ]):
+            self.logger.info(f"✓ Found pricing transparency: explainer_only | Source: {url}")
+            return "explainer_only"
+        
+        # Check for quote-only approach
+        if any(keyword in text_lower for keyword in [
+            "offerte", "vrijblijvend gesprek", "neem contact op",
+            "request quote", "aanvragen", "maatwerk"
+        ]):
+            self.logger.info(f"✓ Found pricing transparency: quote_only | Source: {url}")
+            return "quote_only"
+        
+        return None
+    
+    def fetch_no_cure_no_pay(self, text: str, url: str) -> Optional[bool]:
+        """
+        Check if agency offers no cure no pay recruitment.
+        
+        Returns:
+        - True if mentioned
+        - False if explicitly stated they don't offer it
+        - None if not mentioned
+        """
+        text_lower = text.lower()
+        
+        if any(keyword in text_lower for keyword in NO_CURE_NO_PAY_KEYWORDS):
+            self.logger.info(f"✓ Found no cure no pay: True | Source: {url}")
+            return True
+        
+        return None
+    
+    def fetch_omrekenfactor(self, text: str, url: str) -> tuple[Optional[float], Optional[float]]:
+        """
+        Extract omrekenfactor range from text.
+        
+        Returns:
+        - (min, max) tuple of floats
+        - (None, None) if not found
+        """
+        # Pattern: omrekenfactor 1.45, omrekenfactor vanaf 1.4, 1.35-1.55, etc.
+        patterns = [
+            r'omrekenfactor\s+(?:van\s+)?(\d+[.,]\d+)(?:\s*(?:-|tot)\s*(\d+[.,]\d+))?',
+            r'multiplicator\s+(?:van\s+)?(\d+[.,]\d+)(?:\s*(?:-|tot)\s*(\d+[.,]\d+))?',
+            r'markup\s+(?:van\s+)?(\d+[.,]\d+)(?:\s*(?:-|tot)\s*(\d+[.,]\d+))?',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text.lower())
+            if match:
+                min_val = float(match.group(1).replace(',', '.'))
+                max_val = float(match.group(2).replace(',', '.')) if match.group(2) else None
+                
+                self.logger.info(f"✓ Found omrekenfactor: {min_val} - {max_val} | Source: {url}")
+                return (min_val, max_val)
+        
+        return (None, None)
+    
+    def fetch_avg_time_to_fill(self, text: str, url: str) -> Optional[int]:
+        """
+        Extract average time to fill in days from speed claims.
+        
+        Returns:
+        - Number of days
+        - None if not mentioned
+        """
+        text_lower = text.lower()
+        
+        # Pattern: "binnen 24 uur", "binnen 2 dagen", "binnen een week"
+        patterns = [
+            (r'binnen\s+(\d+)\s+uur', lambda h: max(1, int(h) // 24)),  # hours to days
+            (r'binnen\s+(\d+)\s+dag', lambda d: int(d)),  # days
+            (r'binnen\s+een\s+dag', lambda: 1),  # "binnen een dag"
+            (r'binnen\s+(\d+)\s+we+k', lambda w: int(w) * 7),  # weeks to days
+        ]
+        
+        for pattern, converter in patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                if callable(converter):
+                    days = converter() if len(match.groups()) == 0 else converter(match.group(1))
+                else:
+                    days = converter
+                self.logger.info(f"✓ Found avg time to fill: {days} days | Source: {url}")
+                return days
+        
+        return None
+    
+    def fetch_candidate_pool_size(self, text: str, url: str) -> Optional[int]:
+        """
+        Extract candidate pool size estimate from text.
+        
+        Returns:
+        - Estimated pool size as integer
+        - None if not mentioned
+        """
+        # Pattern: "15.000 kandidaten", "5000 professionals in database", etc.
+        patterns = [
+            r'(\d+[\.,]\d+|\d+)\s+(?:kandidaten|candidates|professionals|medewerkers)\s+(?:in|beschikbaar)',
+            r'(?:database|bestand|pool)\s+van\s+(\d+[\.,]\d+|\d+)',
+            r'(\d+[\.,]\d+|\d+)\s+(?:actieve|beschikbare)\s+(?:kandidaten|professionals)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text.lower())
+            if match:
+                size_str = match.group(1).replace('.', '').replace(',', '')
+                size = int(size_str)
+                self.logger.info(f"✓ Found candidate pool size: {size} | Source: {url}")
+                return size
+        
+        return None
+    
+    def fetch_annual_placements(self, text: str, url: str) -> Optional[int]:
+        """
+        Extract annual placements estimate from text.
+        
+        Returns:
+        - Estimated annual placements
+        - None if not mentioned
+        """
+        # Pattern: "5.000 plaatsingen per jaar", "10000 placements annually", etc.
+        patterns = [
+            r'(\d+[\.,]\d+|\d+)\s+plaatsingen?\s+(?:per\s+jaar|jaarlijks|annually)',
+            r'(\d+[\.,]\d+|\d+)\s+(?:people|professionals|kandidaten)\s+(?:placed|geplaatst)\s+(?:per jaar|annually)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, text.lower())
+            if match:
+                count_str = match.group(1).replace('.', '').replace(',', '')
+                count = int(count_str)
+                self.logger.info(f"✓ Found annual placements: {count} | Source: {url}")
+                return count
+        
+        return None
+    
+    def fetch_uses_inlenersbeloning(self, text: str, url: str) -> Optional[bool]:
+        """
+        Check if agency mentions using inlenersbeloning.
+        
+        Returns:
+        - True if mentioned
+        - None if not mentioned
+        """
+        text_lower = text.lower()
+        
+        if any(keyword in text_lower for keyword in [
+            "inlenersbeloning", "inlenersloon", "loon inlener"
+        ]):
+            self.logger.info(f"✓ Found uses_inlenersbeloning: True | Source: {url}")
+            return True
+        
+        return None
+    
+    def fetch_applies_inlenersbeloning_from_day1(self, text: str, url: str) -> Optional[bool]:
+        """
+        Check if agency applies inlenersbeloning from day 1.
+        
+        Returns:
+        - True if explicitly mentioned from day 1
+        - False if mentioned after a waiting period
+        - None if not mentioned
+        """
+        text_lower = text.lower()
+        
+        if any(keyword in text_lower for keyword in [
+            "inlenersbeloning vanaf dag 1", "inlenersbeloning dag 1",
+            "inlenersbeloning vanaf de eerste dag"
+        ]):
+            self.logger.info(f"✓ Found applies_inlenersbeloning_from_day1: True | Source: {url}")
+            return True
+        
+        # Check for waiting period mentions
+        if re.search(r'inlenersbeloning\s+(?:na|vanaf)\s+(?:\d+|fase)', text_lower):
+            self.logger.info(f"✓ Found applies_inlenersbeloning_from_day1: False | Source: {url}")
+            return False
+        
+        return None
+    
+    def fetch_min_assignment_duration(self, text: str, url: str) -> Optional[int]:
+        """
+        Extract minimum assignment duration in weeks.
+        
+        Returns:
+        - Number of weeks
+        - None if not mentioned
+        """
+        # Pattern: "minimaal 4 weken", "minimum 2 maanden", etc.
+        patterns = [
+            (r'minim(?:aal|um)\s+(\d+)\s+we+k', lambda w: int(w)),
+            (r'minim(?:aal|um)\s+(\d+)\s+maand', lambda m: int(m) * 4),
+        ]
+        
+        for pattern, converter in patterns:
+            match = re.search(pattern, text.lower())
+            if match:
+                weeks = converter(match.group(1))
+                self.logger.info(f"✓ Found min assignment duration: {weeks} weeks | Source: {url}")
+                return weeks
+        
+        return None
+    
+    def fetch_min_hours_per_week(self, text: str, url: str) -> Optional[int]:
+        """
+        Extract minimum hours per week.
+        
+        Returns:
+        - Number of hours
+        - None if not mentioned
+        """
+        # Pattern: "minimaal 20 uur per week", "minimum 32 uur"
+        pattern = r'minim(?:aal|um)\s+(\d+)\s+uur\s+(?:per\s+week)?'
+        match = re.search(pattern, text.lower())
+        
+        if match:
+            hours = int(match.group(1))
+            self.logger.info(f"✓ Found min hours per week: {hours} | Source: {url}")
+            return hours
+        
+        return None
 
