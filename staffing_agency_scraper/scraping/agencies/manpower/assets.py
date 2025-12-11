@@ -63,7 +63,6 @@ class ManpowerScraper(BaseAgencyScraper):
             url = page["url"]
             page_name = page["name"]
             functions = page.get("functions", [])
-            use_ai = page.get("use_ai", False)
             
             try:
                 self.logger.info("=" * 80)

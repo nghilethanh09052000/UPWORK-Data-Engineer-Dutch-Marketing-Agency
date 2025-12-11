@@ -6,7 +6,7 @@ Part of: Randstad Groep Nederland"""
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List
 
 import dagster as dg
 from bs4 import BeautifulSoup
@@ -14,7 +14,6 @@ from bs4 import BeautifulSoup
 from staffing_agency_scraper.models import Agency, GeoFocusType
 from staffing_agency_scraper.scraping.base import BaseAgencyScraper
 from staffing_agency_scraper.scraping.utils import AgencyScraperUtils
-
 
 class YachtScraper(BaseAgencyScraper):
     """Scraper for Yacht Netherlands."""
@@ -57,14 +56,12 @@ class YachtScraper(BaseAgencyScraper):
         agency.employers_page_url = f"{self.WEBSITE_URL}/werkgevers"
         agency.contact_form_url = f"{self.WEBSITE_URL}/contact"
         
-        all_sectors: Set[str] = set()
+        all_sectors = set()
         
         for page in self.PAGES_TO_SCRAPE:
             url = page["url"]
             page_name = page["name"]
-            functions = page.get("functions", [])
-            use_ai = page.get("use_ai", False)
-            
+            functions = page.get("functions", [])            
             try:
                 self.logger.info("=" * 80)
                 self.logger.info(f"📄 PROCESSING: {page_name}")
@@ -76,7 +73,27 @@ class YachtScraper(BaseAgencyScraper):
                 page_text = soup.get_text(separator=" ", strip=True)
                 
                 # Apply normal functions
-                self._apply_functions_normal(agency, functions, soup, page_text, all_sectors, url)
+                self._apply_functions(agency, functions, soup, page_text, all_sectors, url)
+                
+                # Portal detection on every page
+                if self.utils.detect_candidate_portal(soup, page_text, url):
+                    agency.digital_capabilities.candidate_portal = True
+                if self.utils.detect_client_portal(soup, page_text, url):
+                    agency.digital_capabilities.client_portal = True
+                
+                # Extract role levels on every page
+                role_levels = self.utils.fetch_role_levels(page_text, url)
+                if role_levels:
+                    if not agency.role_levels:
+                        agency.role_levels = []
+                    agency.role_levels.extend(role_levels)
+                    agency.role_levels = list(set(agency.role_levels))
+                
+                # Extract review sources
+                review_sources = self.utils.fetch_review_sources(soup, url)
+                if review_sources and not agency.review_sources:
+                    agency.review_sources = review_sources
+                
                 self.logger.info(f"✅ Completed: {page_name}")
                 
             except Exception as e:
@@ -96,7 +113,7 @@ class YachtScraper(BaseAgencyScraper):
         
         return agency
     
-    def _apply_functions_normal(
+    def _apply_functions(
         self,
         agency: Agency,
         functions: List[str],
@@ -147,61 +164,3 @@ class YachtScraper(BaseAgencyScraper):
                             all_sectors.add(text)
                             self.logger.info(f"✓ Found sector: '{text}' | Source: {url}")
     
-    def _apply_functions_ai(self, agency: Agency, url: str) -> None:
-        """Apply AI extraction functions (only for missing fields)."""
-        # Digital capabilities
-        if not agency.digital_capabilities.candidate_portal:
-            self.utils.fetch_ai_digital_capabilities(agency, url)
-        
-        # AI capabilities
-        if not agency.ai_capabilities.chatbot_for_candidates:
-            self.utils.fetch_ai_ai_capabilities(agency, url)
-        
-        # Membership & CAO
-        if not agency.membership:
-            content = self.utils.fetch_page_ai(url)
-            cao = self.utils.fetch_cao_type(content, url)
-            membership = self.utils.fetch_membership(content, url)
-            if cao:
-                agency.cao_type = cao
-            if membership:
-                agency.membership = membership
-        
-        # Phase system
-        if not agency.phase_system:
-            content = self.utils.fetch_page_ai(url)
-            phase = self.utils.fetch_phase_system(content, url)
-            if phase:
-                agency.phase_system = phase
-        
-        # Certifications
-        if not agency.certifications:
-            content = self.utils.fetch_page_ai(url)
-            certs = self.utils.fetch_certifications(content, url)
-            if certs:
-                agency.certifications = certs
-        
-        # Pricing
-        if not agency.avg_hourly_rate_low:
-            self.utils.fetch_ai_pricing(agency, url)
-        
-        # Reviews
-        if not agency.review_rating:
-            self.utils.fetch_ai_reviews(agency, url)
-
-
-@dg.asset(group_name="agencies")
-def yacht_scrape() -> dg.Output[dict]:
-    """Scrape Yacht Netherlands website."""
-    scraper = YachtScraper()
-    agency = scraper.scrape()
-    output_path = scraper.save_to_json(agency)
-    return dg.Output(
-        value=agency.to_json_dict(),
-        metadata={
-            "agency_name": agency.agency_name,
-            "website_url": agency.website_url,
-            "pages_scraped": len(agency.evidence_urls),
-            "output_file": output_path,
-        },
-    )
