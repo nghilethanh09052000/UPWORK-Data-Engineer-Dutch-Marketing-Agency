@@ -53,6 +53,8 @@ output/
 !package.json
 !package-lock.json
 
+# Test
+*.html
 # Logs
 logs/
 *.log
