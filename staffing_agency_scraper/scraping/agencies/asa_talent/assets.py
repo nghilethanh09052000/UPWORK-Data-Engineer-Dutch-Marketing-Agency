@@ -556,14 +556,21 @@ class ASATalentScraper(BaseAgencyScraper):
         
         if "student" in text_lower:
             segments.append("studenten")
+            self.logger.info("✓ Found focus segment: studenten")
         if "starter" in text_lower:
             segments.append("starters")
+            self.logger.info("✓ Found focus segment: starters")
         if "professional" in text_lower:
             segments.append("young_professionals")
+            self.logger.info("✓ Found focus segment: young_professionals")
         if "bijbaan" in text_lower or "flexibel" in text_lower:
-            segments.append("studenten")
+            if "studenten" not in segments:
+                segments.append("studenten")
+                self.logger.info("✓ Found focus segment: studenten (bijbaan/flexibel)")
         
-        return list(set(segments))
+        unique_segments = list(set(segments))
+        self.logger.info(f"Total focus segments found: {len(unique_segments)}")
+        return unique_segments
 
     def _extract_digital_capabilities(self, text: str) -> DigitalCapabilities:
         """

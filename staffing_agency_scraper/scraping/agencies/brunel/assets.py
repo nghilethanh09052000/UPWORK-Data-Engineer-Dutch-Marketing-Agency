@@ -861,16 +861,23 @@ class BrunelScraper(BaseAgencyScraper):
 
         if "specialist" in text_lower or "professional" in text_lower:
             segments.append("specialisten")
+            self.logger.info("✓ Found focus segment: specialisten")
         if "technisch" in text_lower or "engineer" in text_lower:
             segments.append("technisch_specialisten")
+            self.logger.info("✓ Found focus segment: technisch_specialisten")
         if "senior" in text_lower:
             segments.append("senior")
+            self.logger.info("✓ Found focus segment: senior")
         if "medior" in text_lower:
             segments.append("medior")
+            self.logger.info("✓ Found focus segment: medior")
         if "trainee" in text_lower or "starter" in text_lower:
             segments.append("starters")
+            self.logger.info("✓ Found focus segment: starters")
 
-        return list(set(segments))
+        unique_segments = list(set(segments))
+        self.logger.info(f"Total focus segments found: {len(unique_segments)}")
+        return unique_segments
 
     def _extract_digital_capabilities(self, text: str) -> DigitalCapabilities:
         """Extract digital capabilities from text."""

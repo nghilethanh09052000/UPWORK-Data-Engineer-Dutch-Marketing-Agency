@@ -498,13 +498,17 @@ class HaysScraper(BaseAgencyScraper):
         
         if any(kw in text_lower for kw in ["professional", "specialist", "white collar"]):
             segments.append("white_collar")
+            self.logger.info("✓ Found focus segment: white_collar")
         
         if any(kw in text_lower for kw in ["engineering", "technical", "technology", "it"]):
             segments.append("technisch_specialisten")
+            self.logger.info("✓ Found focus segment: technisch_specialisten")
         
         if any(kw in text_lower for kw in ["finance", "accounting"]):
             segments.append("finance_specialists")
+            self.logger.info("✓ Found focus segment: finance_specialists")
         
+        self.logger.info(f"Total focus segments found: {len(segments)}")
         return segments
 
     def _extract_regions_served(self, text: str) -> list[str]:
@@ -514,10 +518,13 @@ class HaysScraper(BaseAgencyScraper):
         
         if "netherlands" in text_lower or "nederland" in text_lower:
             regions.append("landelijk")
+            self.logger.info("✓ Found region: landelijk (Netherlands)")
         
         if "worldwide" in text_lower or "international" in text_lower or "global" in text_lower:
             regions.append("internationaal")
+            self.logger.info("✓ Found region: internationaal (Worldwide)")
         
+        self.logger.info(f"Total regions found: {len(regions)}")
         return regions
 
 

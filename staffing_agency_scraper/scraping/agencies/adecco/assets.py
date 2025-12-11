@@ -736,18 +736,24 @@ class AdeccoScraper(BaseAgencyScraper):
         import re
         vakgebied_match = re.search(r'VAKGEBIED(.{0,600})', text, re.IGNORECASE | re.DOTALL)
         if vakgebied_match:
+            self.logger.info("✓ Found VAKGEBIED section in text")
             vakgebied_text = vakgebied_match.group(1).lower()
             for adecco_term, standard_sector in adecco_vakgebieden.items():
                 if adecco_term in vakgebied_text:
                     sectors.append(standard_sector)
+                    self.logger.info(f"  → Found sector from VAKGEBIED: {adecco_term} → {standard_sector}")
         
         # If VAKGEBIED not found, fall back to broader matching
         if not sectors:
+            self.logger.info("VAKGEBIED not found, using broader text matching")
             for adecco_term, standard_sector in adecco_vakgebieden.items():
                 if adecco_term in text_lower:
                     sectors.append(standard_sector)
+                    self.logger.info(f"  → Found sector (broad match): {adecco_term} → {standard_sector}")
 
-        return list(set(sectors))
+        unique_sectors = list(set(sectors))
+        self.logger.info(f"Total unique sectors found: {len(unique_sectors)}")
+        return unique_sectors
 
     def _extract_services(self, text: str) -> AgencyServices:
         """
@@ -763,24 +769,66 @@ class AdeccoScraper(BaseAgencyScraper):
         diensten_match = re.search(r'diensten(.{0,1500})', text_lower, re.DOTALL)
         diensten_context = diensten_match.group(1) if diensten_match else text_lower
 
+        # Core staffing services
+        uitzenden = any(w in diensten_context for w in ["uitzenden", "uitzendwerk", "flexibel personeel", "tijdelijke krachten"])
+        if uitzenden:
+            self.logger.info("✓ Found service: uitzenden")
+        
+        detacheren = any(w in diensten_context for w in ["detacheren", "detachering"])
+        if detacheren:
+            self.logger.info("✓ Found service: detacheren")
+        
+        werving_selectie = any(w in diensten_context for w in ["werving en selectie", "werving & selectie", "recruitment"])
+        if werving_selectie:
+            self.logger.info("✓ Found service: werving_selectie")
+        
+        payrolling = "payroll" in diensten_context
+        if payrolling:
+            self.logger.info("✓ Found service: payrolling")
+        
+        # Specialized services
+        zzp_bemiddeling = any(w in diensten_context for w in ["zzp bemiddeling", "freelance bemiddeling"])
+        if zzp_bemiddeling:
+            self.logger.info("✓ Found service: zzp_bemiddeling")
+        
+        inhouse_services = any(w in diensten_context for w in ["inhouse", "in-house", "on-site services"])
+        if inhouse_services:
+            self.logger.info("✓ Found service: inhouse_services")
+        
+        msp = any(w in diensten_context for w in ["managed service provider", "msp diensten"])
+        if msp:
+            self.logger.info("✓ Found service: msp")
+        
+        rpo = any(w in diensten_context for w in ["recruitment process outsourcing", "rpo diensten"])
+        if rpo:
+            self.logger.info("✓ Found service: rpo")
+        
+        executive_search = "executive search" in diensten_context
+        if executive_search:
+            self.logger.info("✓ Found service: executive_search")
+        
+        # Training/development
+        opleiden_ontwikkelen = any(w in text_lower for w in ["opleiden en ontwikkelen", "training en ontwikkeling", "adecco academy"])
+        if opleiden_ontwikkelen:
+            self.logger.info("✓ Found service: opleiden_ontwikkelen")
+        
+        reintegratie_outplacement = any(w in diensten_context for w in ["reïntegratie", "outplacement"])
+        if reintegratie_outplacement:
+            self.logger.info("✓ Found service: reintegratie_outplacement")
+
         return AgencyServices(
-            # Core staffing services - look for Dutch terms specifically
-            uitzenden=any(w in diensten_context for w in ["uitzenden", "uitzendwerk", "flexibel personeel", "tijdelijke krachten"]),
-            detacheren=any(w in diensten_context for w in ["detacheren", "detachering"]),
-            werving_selectie=any(w in diensten_context for w in ["werving en selectie", "werving & selectie", "recruitment"]),
-            payrolling="payroll" in diensten_context,
-            
-            # Specialized services - be strict
-            zzp_bemiddeling=any(w in diensten_context for w in ["zzp bemiddeling", "freelance bemiddeling"]),
+            uitzenden=uitzenden,
+            detacheren=detacheren,
+            werving_selectie=werving_selectie,
+            payrolling=payrolling,
+            zzp_bemiddeling=zzp_bemiddeling,
             vacaturebemiddeling_only=False,
-            inhouse_services=any(w in diensten_context for w in ["inhouse", "in-house", "on-site services"]),
-            msp=any(w in diensten_context for w in ["managed service provider", "msp diensten"]),
-            rpo=any(w in diensten_context for w in ["recruitment process outsourcing", "rpo diensten"]),
-            executive_search="executive search" in diensten_context,
-            
-            # Training/development - be strict
-            opleiden_ontwikkelen=any(w in text_lower for w in ["opleiden en ontwikkelen", "training en ontwikkeling", "adecco academy"]),
-            reintegratie_outplacement=any(w in diensten_context for w in ["reïntegratie", "outplacement"]),
+            inhouse_services=inhouse_services,
+            msp=msp,
+            rpo=rpo,
+            executive_search=executive_search,
+            opleiden_ontwikkelen=opleiden_ontwikkelen,
+            reintegratie_outplacement=reintegratie_outplacement,
         )
 
     def _extract_focus_segments(self, text: str) -> list[str]:
@@ -800,28 +848,36 @@ class AdeccoScraper(BaseAgencyScraper):
         # Blue collar indicators (productie, logistiek)
         if any(w in vakgebied_text for w in ["productie", "logistiek"]):
             segments.append("blue_collar")
+            self.logger.info("✓ Found focus segment: blue_collar (productie, logistiek)")
         
         # White collar indicators (administratief, hr, finance, juridisch)
         if any(w in vakgebied_text for w in ["administratief", "financieel", "hr", "juridisch", "secretarieel"]):
             segments.append("white_collar")
+            self.logger.info("✓ Found focus segment: white_collar (administratief, finance, hr)")
         
         # Technical specialists
         if "techniek" in vakgebied_text or "it" in vakgebied_text:
             segments.append("technisch_specialisten")
+            self.logger.info("✓ Found focus segment: technisch_specialisten (techniek, IT)")
         
         # Healthcare
         if "medisch" in vakgebied_text or "zorg" in text_lower:
             segments.append("zorgprofessionals")
+            self.logger.info("✓ Found focus segment: zorgprofessionals (medisch, zorg)")
         
         # Students - only if explicitly mentioned
         if any(w in text_lower for w in ["studentenwerk", "bijbaan", "studenten vacatures"]):
             segments.append("studenten")
+            self.logger.info("✓ Found focus segment: studenten")
         
         # Young professionals - only if explicitly mentioned
         if any(w in text_lower for w in ["young professional", "traineeship", "starter"]):
             segments.append("young_professionals")
+            self.logger.info("✓ Found focus segment: young_professionals")
 
-        return list(set(segments))
+        unique_segments = list(set(segments))
+        self.logger.info(f"Total focus segments found: {len(unique_segments)}")
+        return unique_segments
 
     def _extract_regions(self, text: str) -> list[str]:
         """
@@ -841,11 +897,14 @@ class AdeccoScraper(BaseAgencyScraper):
         
         if cities_found >= 3 or "heel nederland" in text_lower or "landelijk" in text_lower:
             regions.append("landelijk")
+            self.logger.info(f"✓ Found region: landelijk (found {cities_found} Dutch cities)")
         
         # Adecco Group is international
         if any(w in text_lower for w in ["adecco group", "worldwide", "global", "landen"]):
             regions.append("internationaal")
+            self.logger.info("✓ Found region: internationaal (Adecco Group worldwide)")
 
+        self.logger.info(f"Total regions found: {len(regions)}")
         return regions
 
     def _fetch_pdf_certifications(self) -> list[str]:
