@@ -8,7 +8,7 @@ Based on the 69 fields defined in output/_sample.json.
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from bs4 import BeautifulSoup
 
@@ -507,39 +507,64 @@ class AgencyScraperUtils:
     # ========================================================================
     
     def fetch_services(self, text: str, url: str) -> AgencyServices:
-        """Extract services from text."""
+        """
+        Extract services from text.
+        
+        Service mapping:
+        - uitzenden: Temporary staffing (blue-collar, operational roles)
+        - detacheren: Interim/secondment (specialists, professionals working at client sites)
+        - werving_selectie: Recruitment & selection (permanent placements)
+        - payrolling: Payroll services
+        - zzp_bemiddeling: Freelance/ZZP intermediation
+        - msp: Managed Service Provider
+        - rpo: Recruitment Process Outsourcing
+        - executive_search: Executive search / headhunting
+        """
         text_lower = text.lower()
         
         services = AgencyServices()
         
+        # Uitzenden (temporary staffing)
         if "uitzenden" in text_lower:
             services.uitzenden = True
             self.logger.info(f"✓ Found service: uitzenden | Source: {url}")
         
-        if "detacheren" in text_lower or "detachering" in text_lower:
+        # Detacheren / Interim (secondment, interim professionals)
+        # Note: "interim" often refers to interim management/specialists
+        if any(keyword in text_lower for keyword in [
+            "detacheren", "detachering", 
+            "interim",  # Interim management, interim professionals
+            "secondment"
+        ]):
             services.detacheren = True
-            self.logger.info(f"✓ Found service: detacheren | Source: {url}")
+            self.logger.info(f"✓ Found service: detacheren (interim/secondment) | Source: {url}")
         
+        # Werving & Selectie (recruitment & selection)
         if "werving" in text_lower or "selectie" in text_lower:
             services.werving_selectie = True
             self.logger.info(f"✓ Found service: werving_selectie | Source: {url}")
         
+        # Payrolling
         if "payroll" in text_lower:
             services.payrolling = True
             self.logger.info(f"✓ Found service: payrolling | Source: {url}")
         
+        # ZZP / Freelance intermediation
         if "zzp" in text_lower or "freelance" in text_lower:
             services.zzp_bemiddeling = True
             self.logger.info(f"✓ Found service: zzp_bemiddeling | Source: {url}")
         
+        # MSP (Managed Service Provider)
         if "msp" in text_lower or "managed service" in text_lower:
             services.msp = True
             self.logger.info(f"✓ Found service: msp | Source: {url}")
         
+        # RPO (Recruitment Process Outsourcing)
         if "rpo" in text_lower or "recruitment process outsourcing" in text_lower:
             services.rpo = True
             self.logger.info(f"✓ Found service: rpo | Source: {url}")
         
+        # Executive Search
         if "executive search" in text_lower:
             services.executive_search = True
             self.logger.info(f"✓ Found service: executive_search | Source: {url}")
@@ -550,33 +575,73 @@ class AgencyScraperUtils:
     # CAO & LEGAL (Fields 28-35 from _sample.json)
     # ========================================================================
     
-    def fetch_cao_type(self, text: str, url: str) -> CaoType:
-        """Extract CAO type."""
-        text_lower = text.lower()
+    def fetch_cao_type(self, text: str | Dict[str, str], url: str = "accumulated_text") -> CaoType:
+        """
+        Extract CAO type.
         
-        if "abu" in text_lower:
-            self.logger.info(f"✓ Found CAO: ABU | Source: {url}")
-            return CaoType.ABU
-        elif "nbbu" in text_lower:
-            self.logger.info(f"✓ Found CAO: NBBU | Source: {url}")
-            return CaoType.NBBU
+        Args:
+            text: Either a string of text or a dict mapping URLs to text
+            url: URL to log (only used if text is a string)
+        """
+        # Support both string and dict (URL mapping)
+        if isinstance(text, dict):
+            # Search through each page separately for better logging
+            for page_url, page_text in text.items():
+                text_lower = page_text.lower()
+                if "abu" in text_lower:
+                    self.logger.info(f"✓ Found CAO: ABU | Source: {page_url}")
+                    return CaoType.ABU
+                elif "nbbu" in text_lower:
+                    self.logger.info(f"✓ Found CAO: NBBU | Source: {page_url}")
+                    return CaoType.NBBU
+        else:
+            # Old API: single string
+            text_lower = text.lower()
+            if "abu" in text_lower:
+                self.logger.info(f"✓ Found CAO: ABU | Source: {url}")
+                return CaoType.ABU
+            elif "nbbu" in text_lower:
+                self.logger.info(f"✓ Found CAO: NBBU | Source: {url}")
+                return CaoType.NBBU
         
         return CaoType.ONBEKEND
     
-    def fetch_membership(self, text: str, url: str) -> List[str]:
-        """Extract membership organizations."""
-        text_lower = text.lower()
+    def fetch_membership(self, text: str | Dict[str, str], url: str = "accumulated_text") -> List[str]:
+        """
+        Extract membership organizations.
+        
+        Args:
+            text: Either a string of text or a dict mapping URLs to text
+            url: URL to log (only used if text is a string)
+        """
         membership = []
         
-        if "abu" in text_lower:
-            membership.append("ABU")
-            self.logger.info(f"✓ Found membership: ABU | Source: {url}")
-        if "nbbu" in text_lower:
-            membership.append("NBBU")
-            self.logger.info(f"✓ Found membership: NBBU | Source: {url}")
-        if "nrto" in text_lower:
-            membership.append("NRTO")
-            self.logger.info(f"✓ Found membership: NRTO | Source: {url}")
+        # Support both string and dict (URL mapping)
+        if isinstance(text, dict):
+            # Search through each page separately for better logging
+            for page_url, page_text in text.items():
+                text_lower = page_text.lower()
+                if "abu" in text_lower and "ABU" not in membership:
+                    membership.append("ABU")
+                    self.logger.info(f"✓ Found membership: ABU | Source: {page_url}")
+                if "nbbu" in text_lower and "NBBU" not in membership:
+                    membership.append("NBBU")
+                    self.logger.info(f"✓ Found membership: NBBU | Source: {page_url}")
+                if "nrto" in text_lower and "NRTO" not in membership:
+                    membership.append("NRTO")
+                    self.logger.info(f"✓ Found membership: NRTO | Source: {page_url}")
+        else:
+            # Old API: single string
+            text_lower = text.lower()
+            if "abu" in text_lower:
+                membership.append("ABU")
+                self.logger.info(f"✓ Found membership: ABU | Source: {url}")
+            if "nbbu" in text_lower:
+                membership.append("NBBU")
+                self.logger.info(f"✓ Found membership: NBBU | Source: {url}")
+            if "nrto" in text_lower:
+                membership.append("NRTO")
+                self.logger.info(f"✓ Found membership: NRTO | Source: {url}")
         
         return membership
     
@@ -593,9 +658,14 @@ class AgencyScraperUtils:
         
         return None
     
-    def fetch_certifications(self, text: str, url: str) -> List[str]:
-        """Extract certifications."""
-        text_lower = text.lower()
+    def fetch_certifications(self, text: str | Dict[str, str], url: str = "accumulated_text") -> List[str]:
+        """
+        Extract certifications.
+        
+        Args:
+            text: Either a string of text or a dict mapping URLs to text
+            url: URL to log (only used if text is a string)
+        """
         certs = []
         
         cert_keywords = {
@@ -610,10 +680,22 @@ class AgencyScraperUtils:
             "vcu": "VCU",
         }
         
-        for keyword, cert_name in cert_keywords.items():
-            if keyword in text_lower and cert_name not in certs:
-                certs.append(cert_name)
-                self.logger.info(f"✓ Found certification: {cert_name} | Source: {url}")
+        # Support both string and dict (URL mapping)
+        if isinstance(text, dict):
+            # Search through each page separately for better logging
+            for page_url, page_text in text.items():
+                text_lower = page_text.lower()
+                for keyword, cert_name in cert_keywords.items():
+                    if keyword in text_lower and cert_name not in certs:
+                        certs.append(cert_name)
+                        self.logger.info(f"✓ Found certification: {cert_name} | Source: {page_url}")
+        else:
+            # Old API: single string
+            text_lower = text.lower()
+            for keyword, cert_name in cert_keywords.items():
+                if keyword in text_lower and cert_name not in certs:
+                    certs.append(cert_name)
+                    self.logger.info(f"✓ Found certification: {cert_name} | Source: {url}")
         
         return certs
     
@@ -702,17 +784,25 @@ class AgencyScraperUtils:
         
         Client requirement: Detect student, starter, medior, senior from indirect mentions.
         Keep it simple: if unsure, return empty list.
+        
+        Note: Uses word boundaries to avoid false positives (e.g., "expertise" matching "expert").
         """
         text_lower = text.lower()
         levels = []
         
-        # Check each role level using the constants
+        # Check each role level using the constants with word boundaries
         for level, keywords in ROLE_LEVEL_KEYWORDS.items():
-            if any(keyword in text_lower for keyword in keywords):
-                levels.append(level)
-                self.logger.info(f"✓ Found role_level: {level} | Source: {url}")
-                self.logger.info(f"Text: {text_lower}")
-        return list(set(levels))  # Remove duplicates
+            for keyword in keywords:
+                # Use word boundary regex to match whole words only
+                # This prevents "expertise" from matching "expert", etc.
+                pattern = r'\b' + re.escape(keyword) + r'\b'
+                if re.search(pattern, text_lower):
+                    if level not in levels:
+                        levels.append(level)
+                        self.logger.info(f"✓ Found role_level: {level} | Source: {url}")
+                    break  # Move to next level once found
+        
+        return levels
     
     # ========================================================================
     # REVIEW SOURCES (Client requirement #5)
@@ -857,7 +947,6 @@ class AgencyScraperUtils:
                 # print('text', text_lower)
                 size_fits.append(size_category)
                 self.logger.info(f"✓ Found company size fit: {size_category} | Source: {url}")
-                self.logger.info(f"Text: {text_lower}")
         
         return list(set(size_fits))  # Remove duplicates
     

@@ -97,14 +97,9 @@ class MichaelPageScraper(BaseAgencyScraper):
             except Exception as e:
                 self.logger.warning(f"Error scraping {url}: {e}")
         
-        # Extract from aggregated text (merge with existing)
-        cert_from_utils = self.utils.fetch_certifications(all_text, "accumulated_text")
-        if cert_from_utils:
-            if not agency.certifications:
-                agency.certifications = []
-            agency.certifications.extend(cert_from_utils)
-            agency.certifications = list(set(agency.certifications))  # Remove duplicates
         
+        agency.certifications = list(set(agency.certifications))
+    
         agency.cao_type = self.utils.fetch_cao_type(all_text, "accumulated_text")
         agency.membership = self.utils.fetch_membership(all_text, "accumulated_text")
         
