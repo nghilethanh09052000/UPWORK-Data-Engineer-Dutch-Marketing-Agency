@@ -11,23 +11,29 @@ This project scrapes only **factual company data** from official staffing agency
 - Only publicly visible information
 
 ### MVP Phase 1: 15 Agencies
-1. Randstad
-2. Tempo-Team
-3. YoungCapital
-4. ASA Talent
-5. Manpower
-6. Adecco ✅ (with API + PDF parsing)
-7. Olympia
-8. Start People
-9. Covebo
-10. Brunel ✅
-11. Yacht
-12. Maandag®
-13. Hays Nederland
-14. Michael Page / Page Personnel
+
+**Completed (9/15)**:
+1. ✅ **Adecco** - Complex scraper with API integration + PDF parsing
+2. ✅ **ASA Talent** - Standard scraper with normalized sectors
+3. ✅ **Brunel** - International agency with JSON extraction
+4. ✅ **Hays Nederland** - Multiple page sources, chatbot detection
+5. ✅ **Maandag** - JSON-LD extraction, certification pages
+6. ✅ **Manpower** - 23 office locations, sector categorization
+7. ✅ **Michael Page** - 4 offices, ISO certifications, Google reviews
+8. ✅ **Olympia** - Paginated offices, SMB focus, ABU CAO
+9. ✅ **Start People** - PDF legal extraction, RGF Staffing group
+
+**In Progress (1/15)**:
+10. 🔄 **Randstad** - Global HQ, services extraction started
+
+**To Do (5/15)**:
+11. Tempo-Team
+12. YoungCapital
+13. Covebo
+14. Yacht
 15. TMI (Zorg)
 
-✅ = Includes client feedback improvements (logo filtering, sector normalization, portal detection, role levels, review sources)
+**Key**: ✅ = Completed | 🔄 = In Progress | All completed scrapers include: logo filtering, sector normalization, portal detection, role levels, review sources, certifications, office locations
 
 ## Architecture & Improvements
 
@@ -53,31 +59,41 @@ All agency scrapers follow a consistent architecture:
    - Implement custom logic for unique website structures
    - Can include API calls, PDF parsing, JSON extraction
 
-### Client Feedback Improvements (December 2025)
+### Recent Improvements (December 2025)
 
-Five key improvements implemented across all scrapers:
+**Core Enhancements Across All Scrapers**:
 
-1. **Logo Scraping**: Extract only PNG/SVG files from header/footer, exclude banners
-2. **Sector Normalization**: Restrict to 15 normalized sectors (logistiek, horeca, zorg, etc.)
-3. **Portal Detection**: Detect "login", "inloggen", "mijn...", "client portal" keywords
-4. **Role Levels**: Infer student, starter, medior, senior from website content
-5. **Review Sources**: Extract review platform names and URLs from footer/about pages
+1. **Logo Extraction**: PNG/SVG filtering, banner exclusion, JSON-LD extraction
+2. **Sector Normalization**: 15 standardized Dutch sectors with keyword mapping
+3. **Portal Detection**: Improved candidate/client portal keyword detection
+4. **Role Levels**: Automatic inference (student, starter, medior, senior) with word boundaries
+5. **Review Sources**: Extract Google Reviews, Trustpilot, Indeed links
+6. **Office Locations**: Paginated scraping, city-to-province mapping (50+ cities)
+7. **Legal Data**: KVK extraction, legal name from footer/legal pages
+8. **Certifications**: Enhanced extraction including PDF parsing (ABU, SNA, ISO, etc.)
+9. **API Integration**: Support for JSON APIs (Adecco jobs API, Next.js data)
+10. **Error Handling**: Comprehensive logging with source URL tracking
 
-**Current Status**:
-- ✅ Adecco: All 5 improvements implemented
-- ✅ ASA Talent: All 5 improvements implemented  
-- 🔄 Brunel: 4/5 (logo issue being investigated)
+**All 9 Completed Scrapers Include**:
+- ✅ BeautifulSoup-based extraction (no AI/LLM dependencies)
+- ✅ Structured page task system with custom extraction functions
+- ✅ Reusable utility methods from `AgencyScraperUtils` (69 methods)
+- ✅ Evidence URL tracking for all scraped pages
+- ✅ JSON output with 70+ structured fields
 
 ## Tech Stack
 
 - **Orchestration**: Dagster (with local file-based logging)
-- **Scraping**: BeautifulSoup + requests + crawl4ai (optional)
+- **Scraping**: BeautifulSoup + requests (pure Python, no browser automation)
 - **PDF Parsing**: pdfplumber (for certificates, legal documents)
+- **JSON Extraction**: Native Python (`json.loads`, regex for embedded data)
 - **Data Storage**: PostgreSQL
 - **Package Management**: uv
 - **Linting**: ruff
 - **Type Checking**: pyright
 - **Database Migrations**: Prisma
+
+**Note**: All scrapers use lightweight BeautifulSoup parsing. No AI, LLM, or browser automation dependencies.
 
 ## Setup
 
@@ -152,10 +168,23 @@ uv run dagster asset materialize -m staffing_agency_scraper.definitions -a adecc
 
 Run multiple agencies:
 ```bash
+# Run 3 completed scrapers
 uv run dagster asset materialize -m staffing_agency_scraper.definitions \
   -a adecco_scrape \
   -a asa_talent_scrape \
   -a brunel_scrape
+
+# Run all 9 completed scrapers
+uv run dagster asset materialize -m staffing_agency_scraper.definitions \
+  -a adecco_scrape \
+  -a asa_talent_scrape \
+  -a brunel_scrape \
+  -a hays_scrape \
+  -a maandag_scrape \
+  -a manpower_scrape \
+  -a michael_page_scrape \
+  -a olympia_scrape \
+  -a start_people_scrape
 ```
 
 ### Viewing Logs
@@ -186,18 +215,19 @@ cat logs/compute_logs/*/compute.out
 │   │   ├── base.py                 # BaseAgencyScraper class
 │   │   ├── utils.py                # AgencyScraperUtils (69 reusable extraction methods)
 │   │   ├── definitions.py          # Scraping module definitions
-│   │   └── agencies/               # Per-agency scrapers (15 MVP agencies)
+│   │   └── agencies/               # Per-agency scrapers (9/15 complete)
 │   │       ├── __init__.py
-│   │       ├── randstad/
-│   │       │   ├── assets.py       # Scraper implementation
-│   │       │   └── definitions.py  # Dagster asset definition
-│   │       ├── adecco/             # Complex scraper with API + PDF parsing
-│   │       ├── asa_talent/         # Normalized sector extraction
-│   │       ├── brunel/             # International agency
-│   │       ├── manpower/
-│   │       ├── tempo_team/
-│   │       ├── youngcapital/
-│   │       └── ...
+│   │       ├── adecco/             # ✅ Complex: API + PDF parsing
+│   │       ├── asa_talent/         # ✅ Standard: Normalized sectors
+│   │       ├── brunel/             # ✅ Advanced: __NEXT_DATA__ extraction
+│   │       ├── hays/               # ✅ Standard: Legal pages, chatbot
+│   │       ├── maandag/            # ✅ Advanced: JSON-LD, Next.js data
+│   │       ├── manpower/           # ✅ Medium: 23 offices, sectors
+│   │       ├── michael_page/       # ✅ Advanced: 4 offices, ISO certs
+│   │       ├── olympia/            # ✅ Medium: Paginated, SMB stats
+│   │       ├── start_people/       # ✅ Medium: PDF legal, RGF group
+│   │       ├── randstad/           # 🔄 In Progress
+│   │       └── ...                 # 5 agencies to do
 │   ├── lib/
 │   │   ├── fetch.py                # HTTP utilities
 │   │   ├── browser.py              # Playwright utilities (optional)
@@ -218,7 +248,7 @@ cat logs/compute_logs/*/compute.out
 ├── logs/                           # Local log files
 │   ├── dagster.log                 # Main Dagster log
 │   └── compute_logs/               # Per-run execution logs
-├── output/                         # JSON output directory (15 agency JSONs)
+├── output/                         # JSON output (9 agencies completed)
 ├── tests/
 ├── dagster.yaml                    # Dagster logging configuration
 ├── pyproject.toml
@@ -368,28 +398,32 @@ Each agency produces a JSON record with 70+ fields organized into categories:
 
 ## Field Implementation Status
 
-| Category | Fields | Implemented | Notes |
-|----------|--------|-------------|-------|
-| Basic Identity | 8 | ✅ 8 | All implemented, logo filtering improved |
-| Contact | 4 | ✅ 4 | All implemented |
-| Geographic | 3 | ✅ 3 | office_locations from APIs, contact pages |
-| Market Positioning | 5 | ✅ 5 | **NEW**: role_levels now extracted! |
-| Specialisations | 4 | ✅ 3 | typical_use_cases partial |
-| Services | 12 | ✅ 12 | All implemented |
-| Legal/CAO | 6 | ✅ 6 | **NEW**: certifications from PDFs |
-| Pricing | 9 | ⚠️ 2 | Most require manual analysis |
-| Operational Claims | 7 | ⚠️ 2 | Most require marketing text analysis |
-| Digital/AI | 12 | ✅ 10 | **NEW**: Portal detection improved! |
-| Review | 7 | ✅ 2 | **NEW**: review_sources extraction |
-| Meta | 4 | ✅ 4 | All implemented |
+| Category | Fields | Implemented | Coverage | Notes |
+|----------|--------|-------------|----------|-------|
+| Basic Identity | 8 | ✅ 8 | 100% | Logo filtering, KVK extraction, legal names |
+| Contact | 4 | ✅ 4 | 100% | Phone, email, contact forms, employer pages |
+| Geographic | 3 | ✅ 3 | 100% | Office locations with province mapping (50+ cities) |
+| Market Positioning | 5 | ✅ 5 | 100% | Sector normalization, role levels, company size fit |
+| Specialisations | 4 | ✅ 4 | 100% | Focus segments, shift types, volume, use cases |
+| Services | 12 | ✅ 12 | 100% | All service types detected from navigation/content |
+| Legal/CAO | 6 | ✅ 6 | 100% | CAO types, certifications (PDF parsing), memberships |
+| Pricing | 9 | ⚠️ 4 | 40% | Partial: no_cure_no_pay, pricing hints, some averages |
+| Operational Claims | 7 | ⚠️ 4 | 60% | Speed claims, time-to-fill, some pool sizes |
+| Digital/AI | 12 | ✅ 11 | 92% | Portal detection, mobile apps, chatbots, API presence |
+| Review | 7 | ✅ 3 | 40% | Review sources, some ratings/counts from websites |
+| Meta | 4 | ✅ 4 | 100% | Growth signals, evidence URLs, timestamps, notes |
 
-**Recent Improvements**:
-- ✅ `role_levels`: Now inferred from website content (student, starter, medior, senior)
-- ✅ `digital_capabilities.candidate_portal`: Improved keyword detection
-- ✅ `digital_capabilities.client_portal`: Improved keyword detection
-- ✅ `review_sources`: Extract review platform names from footer/about pages
-- ✅ `certifications`: Enhanced extraction including PDF parsing
-- ✅ `sectors_core`: Normalized to 15 standardized sectors
+**Total**: 67/81 fields implemented (83% coverage)
+
+**December 2025 Enhancements**:
+- ✅ `office_locations`: City-to-province mapping for 50+ Dutch cities
+- ✅ `role_levels`: Word boundary matching to prevent false positives
+- ✅ `certifications`: PDF extraction for certificate pages
+- ✅ `review_sources`: Google Reviews, Trustpilot, Indeed detection
+- ✅ `company_size_fit`: Automatic detection (micro, SMB, enterprise, public)
+- ✅ `customer_segments`: MKB, overheid, zorg detection
+- ✅ `chatbot_for_candidates/clients`: Zopim, Intercom detection
+- ✅ `api_available`: API endpoint discovery (e.g., Adecco jobs API)
 
 ---
 
@@ -629,11 +663,31 @@ tail -f logs/dagster.log
 
 ### Examples to Follow
 
-- **Simple scraper**: `asa_talent/assets.py`, `manpower/assets.py`
-- **Complex scraper with API**: `adecco/assets.py`
-- **International agency**: `brunel/assets.py`
+**By Complexity Level**:
 
-All 69 reusable extraction methods are available in `scraping/utils.py`.
+- **Simple/Standard**: 
+  - `asa_talent/assets.py` - Basic sector extraction
+  - `hays/assets.py` - KVK from legal pages, chatbot detection
+  
+- **Medium Complexity**:
+  - `manpower/assets.py` - 23 offices, JSON extraction, sector categorization
+  - `olympia/assets.py` - Paginated scraping, SMB statistics
+  - `start_people/assets.py` - PDF privacy statement, province mapping
+  
+- **Advanced**:
+  - `adecco/assets.py` - API integration, PDF parsing, Brotli handling
+  - `brunel/assets.py` - International agency, __NEXT_DATA__ extraction
+  - `michael_page/assets.py` - Multi-office, ISO certs, takeover policy
+  - `maandag/assets.py` - JSON-LD, Next.js data, certification pages
+
+**Common Patterns Across All Scrapers**:
+- Structured page tasks with custom functions
+- `self.utils` for 69+ reusable extractions
+- Evidence URL automatic tracking
+- City-to-province mapping for offices
+- Sector normalization to 15 standard categories
+- Portal and chatbot detection
+- Comprehensive error handling with source logging
 
 ## Environment Variables
 
@@ -657,9 +711,13 @@ make dev-no-db          # Start Dagster UI (without DB)
 make lint               # Run linter
 make test               # Run tests
 
-# Scraping
+# Scraping (single agency)
 uv run dagster asset materialize -m staffing_agency_scraper.definitions -a adecco_scrape
-uv run dagster asset materialize -m staffing_agency_scraper.definitions -a asa_talent_scrape -a brunel_scrape
+uv run dagster asset materialize -m staffing_agency_scraper.definitions -a start_people_scrape
+
+# Scraping (multiple agencies)
+uv run dagster asset materialize -m staffing_agency_scraper.definitions \
+  -a adecco_scrape -a manpower_scrape -a olympia_scrape
 
 # Logging
 tail -f logs/dagster.log                    # View main log
@@ -668,8 +726,10 @@ cat logs/compute_logs/*/compute.out         # View latest run
 
 # Output
 cat output/adecco.json                      # View scraped data
-grep "role_levels" output/*.json            # Check specific fields
-ls -lh output/                              # List all scraped agencies
+cat output/start_people.json                # View Start People data
+grep "role_levels" output/*.json            # Check specific fields across all agencies
+grep "office_locations" output/*.json -c    # Count offices per agency
+ls -lh output/                              # List all 9 completed JSONs
 ```
 
 ### Key Files
@@ -713,6 +773,25 @@ Proprietary - inhuren.nl
 
 ---
 
-**Last Updated**: December 2025  
-**Client Feedback Improvements**: ✅ Implemented (5/5)  
-**Scrapers Completed**: 3/15 MVP (Adecco, ASA Talent, Brunel)
+## Project Status
+
+**Last Updated**: December 11, 2025  
+**MVP Progress**: 9/15 agencies completed (60%)  
+**Field Coverage**: 67/81 fields implemented (83%)  
+**Utility Functions**: 69 reusable extraction methods in `utils.py`
+
+**Recent Milestones**:
+- ✅ 9 production-ready scrapers with comprehensive data extraction
+- ✅ Standardized architecture with `BaseAgencyScraper` + `AgencyScraperUtils`
+- ✅ BeautifulSoup-only approach (removed AI/LLM dependencies)
+- ✅ City-to-province mapping for 50+ Dutch cities
+- ✅ Paginated scraping support for office locations
+- ✅ PDF extraction for legal documents and certifications
+- ✅ API integration support (JSON endpoints, Next.js data)
+- ✅ Enhanced logging with source URL tracking
+
+**Next Steps**:
+1. Complete Randstad scraper (in progress)
+2. Add 5 remaining MVP agencies (Tempo-Team, YoungCapital, Covebo, Yacht, TMI)
+3. Enhance pricing and review data extraction
+4. Add more growth signals and operational metrics
