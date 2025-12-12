@@ -56,6 +56,9 @@ class YachtScraper(BaseAgencyScraper):
         agency.contact_form_url = f"{self.WEBSITE_URL}/contact"
         
         all_sectors = set()
+        all_text = ""  # Accumulate text from all pages for utils extraction
+        main_soup = None  # Keep homepage soup for portal/review detection
+        
         
         for page in self.PAGES_TO_SCRAPE:
             url = page["url"]
@@ -71,6 +74,13 @@ class YachtScraper(BaseAgencyScraper):
                 # Fetch with BS4
                 soup = self.fetch_page(url)
                 page_text = soup.get_text(separator=" ", strip=True)
+
+                # Accumulate text for utils extraction
+                all_text += " " + page_text
+
+                # Keep homepage soup for portal/review detection in extract_all_common_fields
+                if page_name == "home":
+                    main_soup = soup
                 
                 # Apply extraction functions
                 self._apply_functions(agency, functions, soup, page_text, all_sectors, url)
@@ -104,6 +114,19 @@ class YachtScraper(BaseAgencyScraper):
         # Finalize
         if all_sectors:
             agency.sectors_core = sorted(list(all_sectors))
+
+        # ==================== APPLY ALL COMMON UTILS EXTRACTIONS ====================
+        self.logger.info("=" * 80)
+        self.logger.info("🔧 APPLYING AUTOMATIC UTILS EXTRACTIONS")
+        self.logger.info("-" * 80)
+        
+        # This automatically extracts 40+ fields using accumulated text from all pages
+        self.extract_all_common_fields(agency, all_text, main_soup)
+
+        self.logger.info("✅ Automatic utils extractions completed")
+        self.logger.info("=" * 80)
+        
+        
         
         agency.evidence_urls = list(self.evidence_urls)
         agency.collected_at = self.collected_at
@@ -112,6 +135,9 @@ class YachtScraper(BaseAgencyScraper):
         self.logger.info(f"✅ Completed scrape of {self.AGENCY_NAME}")
         self.logger.info(f"📄 Evidence URLs: {len(agency.evidence_urls)}")
         self.logger.info("=" * 80)
+
+        with open('all_text.txt', 'w') as f:
+            f.write(all_text)
         
         return agency
     

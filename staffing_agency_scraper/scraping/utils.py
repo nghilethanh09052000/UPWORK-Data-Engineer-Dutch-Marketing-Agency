@@ -256,7 +256,7 @@ TYPICAL_USE_CASES_KEYWORDS = {
     "projecten": ["project", "projectbasis", "tijdelijk project"],
     "seizoenswerk": ["seizoen", "seizoenswerk", "zomer", "kerst"],
     "weekenddiensten": ["weekend", "zaterd", "zond"],
-    "24_7_bezetting": ["24/7", "continu", "dag en nacht", "altijd bezet"],
+    "24_7_bezetting": ["24/7", "dag en nacht", "altijd bezet"],
 }
 
 # Speed Claims - Detection Keywords
@@ -709,14 +709,14 @@ class AgencyScraperUtils:
     
     def fetch_services(self, text: str, url: str) -> AgencyServices:
         """
-        Extract services from text.
+        Extract services from text with comprehensive Dutch and English keyword mappings.
         
         Service mapping:
-        - uitzenden: Temporary staffing (blue-collar, operational roles)
+        - uitzenden: Temporary staffing (blue-collar, operational roles, flexwerk)
         - detacheren: Interim/secondment (specialists, professionals working at client sites)
-        - werving_selectie: Recruitment & selection (permanent placements)
+        - werving_selectie: Recruitment & selection (permanent placements, vaste baan)
         - payrolling: Payroll services
-        - zzp_bemiddeling: Freelance/ZZP intermediation
+        - zzp_bemiddeling: Freelance/ZZP intermediation (self-employed)
         - msp: Managed Service Provider
         - rpo: Recruitment Process Outsourcing
         - executive_search: Executive search / headhunting
@@ -727,48 +727,88 @@ class AgencyScraperUtils:
         
         services = AgencyServices()
         
-        # Uitzenden (temporary staffing)
-        if "uitzenden" in text_lower:
+        # Uitzenden (temporary staffing, flexwerk)
+        uitzenden_keywords = [
+            "uitzenden", "uitzendbureau", "uitzendkracht", "uitzendwerk",
+            "flexwerk", "flexwerker", "flexpool", "flexbureau",
+            "tijdelijk personeel", "tijdelijke arbeid",
+            "temporary staffing", "temp work", "temp agency"
+        ]
+        if any(keyword in text_lower for keyword in uitzenden_keywords):
             services.uitzenden = True
-            self.logger.info(f"✓ Found service: uitzenden | Source: {url}")
+            self.logger.info(f"✓ Found service: uitzenden (temporary staffing) | Source: {url}")
         
         # Detacheren / Interim (secondment, interim professionals)
-        # Note: "interim" often refers to interim management/specialists
-        if any(keyword in text_lower for keyword in [
-            "detacheren", "detachering", 
-            "interim",  # Interim management, interim professionals
-            "secondment"
-        ]):
+        detacheren_keywords = [
+            "detacheren", "detachering", "gedetacheerd",
+            "interim", "interim-professional", "interim management", "interim manager",
+            "secondment", "seconded professional",
+            "opdracht", "opdrachtgever",  # Often used in context of detachering
+            "professional", "interim opdracht"
+        ]
+        if any(keyword in text_lower for keyword in detacheren_keywords):
             services.detacheren = True
             self.logger.info(f"✓ Found service: detacheren (interim/secondment) | Source: {url}")
         
-        # Werving & Selectie (recruitment & selection)
-        if "werving" in text_lower or "selectie" in text_lower:
+        # Werving & Selectie (recruitment & selection, permanent placements)
+        werving_keywords = [
+            "werving", "selectie", "werving & selectie", "werving en selectie",
+            "recruitment", "recruiting", "recruitment & selection",
+            "vaste baan", "vast dienstverband", "permanent",
+            "bemiddeling vast", "vaste functie",
+            "headhunting"  # Often part of recruitment
+        ]
+        if any(keyword in text_lower for keyword in werving_keywords):
             services.werving_selectie = True
-            self.logger.info(f"✓ Found service: werving_selectie | Source: {url}")
+            self.logger.info(f"✓ Found service: werving_selectie (recruitment & selection) | Source: {url}")
         
         # Payrolling
-        if "payroll" in text_lower:
+        payrolling_keywords = [
+            "payroll", "payrolling", "salarisadministratie",
+            "loonstrook", "salary administration"
+        ]
+        if any(keyword in text_lower for keyword in payrolling_keywords):
             services.payrolling = True
             self.logger.info(f"✓ Found service: payrolling | Source: {url}")
         
-        # ZZP / Freelance intermediation
-        if "zzp" in text_lower or "freelance" in text_lower:
+        # ZZP / Freelance intermediation (self-employed)
+        zzp_keywords = [
+            "zzp", "zzp'er", "zzp-bemiddeling", "zzp bemiddeling",
+            "zelfstandige", "zelfstandig professional", "zelfstandige zonder personeel",
+            "freelance", "freelancer", "freelance opdracht",
+            "self-employed", "independent contractor",
+            "zzp-opdracht", "zzp opdracht"
+        ]
+        if any(keyword in text_lower for keyword in zzp_keywords):
             services.zzp_bemiddeling = True
-            self.logger.info(f"✓ Found service: zzp_bemiddeling | Source: {url}")
+            self.logger.info(f"✓ Found service: zzp_bemiddeling (freelance) | Source: {url}")
         
         # MSP (Managed Service Provider)
-        if "msp" in text_lower or "managed service" in text_lower:
+        msp_keywords = [
+            "msp", "managed service provider", "managed services",
+            "vendor management", "contingent workforce management"
+        ]
+        if any(keyword in text_lower for keyword in msp_keywords):
             services.msp = True
             self.logger.info(f"✓ Found service: msp | Source: {url}")
         
         # RPO (Recruitment Process Outsourcing)
-        if "rpo" in text_lower or "recruitment process outsourcing" in text_lower:
+        rpo_keywords = [
+            "rpo", "recruitment process outsourcing",
+            "wervingsuitbesteding", "recruitment outsourcing"
+        ]
+        if any(keyword in text_lower for keyword in rpo_keywords):
             services.rpo = True
             self.logger.info(f"✓ Found service: rpo | Source: {url}")
         
         # Executive Search
-        if "executive search" in text_lower:
+        executive_keywords = [
+            "executive search", "executive recruitment",
+            "headhunting", "headhunter",
+            "leidinggevende functies", "directie functies",
+            "c-level recruitment", "senior management"
+        ]
+        if any(keyword in text_lower for keyword in executive_keywords):
             services.executive_search = True
             self.logger.info(f"✓ Found service: executive_search | Source: {url}")
         
