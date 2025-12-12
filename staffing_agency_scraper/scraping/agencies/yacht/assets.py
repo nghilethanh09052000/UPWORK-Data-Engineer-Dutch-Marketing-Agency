@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Set
 
 import dagster as dg
+import json
 from bs4 import BeautifulSoup
 
 from staffing_agency_scraper.models import Agency, GeoFocusType, OfficeLocation
@@ -41,6 +42,11 @@ class YachtScraper(BaseAgencyScraper):
             "name": "contactinformatie",
             "url": "https://www.yacht.nl/contactinformatie/#onze-kantoren",
             "functions": ['office_locations'],
+        },
+        {
+            "name": "email",
+            "url": "https://www.yacht.nl/contactinformatie#yacht-kantoren",
+            "functions": ['email'],
         },
     ]
 
@@ -99,7 +105,6 @@ class YachtScraper(BaseAgencyScraper):
                     agency.role_levels.extend(role_levels)
                     agency.role_levels = list(set(agency.role_levels))
                 
-                # Detect chatbot on homepage
                 if page_name == "home":
                     if self._detect_seamly_chatbot():
                         agency.ai_capabilities.chatbot_for_candidates = True
@@ -173,11 +178,13 @@ class YachtScraper(BaseAgencyScraper):
             
             elif func_name == "office_locations":
                 self._extract_office_locations(soup, url, agency)
+
+            elif func_name == "email":
+                self._extract_email(soup, url, agency)
     
     def _extract_logo(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
         """Extract logo from JSON-LD schema."""
-        import json
-        
+
         self.logger.info(f"🔍 Extracting logo from JSON-LD schema on {url}")
         
         # Find JSON-LD script tags
@@ -214,12 +221,10 @@ class YachtScraper(BaseAgencyScraper):
     
     def _extract_contact(self, soup: BeautifulSoup, page_text: str, agency: Agency, url: str) -> None:
         """Extract contact information (email, phone, office locations)."""
-        email = self.utils.fetch_contact_email(page_text, url)
+
         phone = self.utils.fetch_contact_phone(page_text, url)
         offices = self.utils.fetch_office_locations(soup, url)
 
-        if email:
-            agency.contact_email = email
         if phone:
             agency.contact_phone = phone
         if offices:
@@ -384,6 +389,28 @@ class YachtScraper(BaseAgencyScraper):
                 continue
         
         self.logger.info(f"✓ Total offices extracted: {len(agency.office_locations)}")
+    
+    def _extract_email(self, soup: BeautifulSoup, url: str, agency: Agency) -> None:
+        """Extract email from contact page."""
+
+        self.logger.info(f"🔍 Extracting data from JSON-LD schema on {url} for email")
+        
+        script = soup.find("script", {"data-salesforce-fields": "contactListing"})
+
+        if script:
+            try:
+                data = json.loads(script.string)
+                email = data.get("email")
+                if email:
+                    agency.contact_email = email
+                    self.evidence_urls.append(url)
+                    self.logger.info(f"✓ Email extracted from contactListing JSON: {email}")
+                    return
+            except Exception as e:
+                self.logger.warning(f"⚠ Failed to parse contactListing JSON: {e}")
+
+        self.logger.info("✗ No email found")
+
     
     def _determine_province(self, city: str) -> str:
         """Determine province based on city name."""

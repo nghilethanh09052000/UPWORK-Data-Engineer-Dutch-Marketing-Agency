@@ -12,28 +12,25 @@ This project scrapes only **factual company data** from official staffing agency
 
 ### MVP Phase 1: 15 Agencies
 
-**Completed (10/15)**:
+**✅ ALL COMPLETED (15/15)** 🎉:
+
 1. ✅ **Adecco** - Complex scraper with API integration + PDF parsing
 2. ✅ **ASA Talent** - Standard scraper with normalized sectors
 3. ✅ **Brunel** - International agency with JSON extraction
-4. ✅ **Hays Nederland** - Multiple page sources, chatbot detection
-5. ✅ **Maandag** - JSON-LD extraction, certification pages
-6. ✅ **Manpower** - 23 office locations, sector categorization
-7. ✅ **Michael Page** - 4 offices, ISO certifications, Google reviews
-8. ✅ **Olympia** - Paginated offices, SMB focus, ABU CAO
-9. ✅ **Start People** - PDF legal extraction, RGF Staffing group
-10. ✅ **TMI** - Healthcare specialization, review count & rating extraction
+4. ✅ **Covebo** - Standard scraper with sector extraction
+5. ✅ **Hays Nederland** - Multiple page sources, chatbot detection
+6. ✅ **Maandag** - JSON-LD extraction, certification pages
+7. ✅ **Manpower** - 23 office locations, sector categorization
+8. ✅ **Michael Page** - 4 offices, ISO certifications, Google reviews
+9. ✅ **Olympia** - Paginated offices, SMB focus, ABU CAO
+10. ✅ **Randstad** - Global HQ, comprehensive services extraction
+11. ✅ **Start People** - PDF legal extraction, RGF Staffing group
+12. ✅ **Tempo-Team** - Standard scraper with sector normalization
+13. ✅ **TMI** - Healthcare specialization (Zorg), review rating extraction
+14. ✅ **Yacht** - JSON-LD extraction, 7 offices, Seamly chatbot detection, 9 sectors
+15. ✅ **YoungCapital** - JSON-LD extraction, 6 social platforms, founded 2000
 
-**In Progress (1/15)**:
-11. 🔄 **Randstad** - Global HQ, services extraction started
-
-**To Do (4/15)**:
-12. Tempo-Team
-13. YoungCapital
-14. Covebo
-15. Yacht
-
-**Key**: ✅ = Completed | 🔄 = In Progress | All completed scrapers include: logo filtering, sector normalization, portal detection, role levels, review sources, certifications, office locations
+**Key Features Across All Scrapers**: JSON-LD extraction, logo filtering, sector normalization, portal detection, role levels, review sources, certifications, office locations, Dutch keyword optimization
 
 ## Architecture & Improvements
 
@@ -681,7 +678,9 @@ tail -f logs/dagster.log
   - `brunel/assets.py` - International agency, __NEXT_DATA__ extraction
   - `michael_page/assets.py` - Multi-office, ISO certs, takeover policy
   - `maandag/assets.py` - JSON-LD, Next.js data, certification pages
-  - `tmi/assets.py` - Healthcare specialization, review count & rating extraction
+  - `yacht/assets.py` - JSON-LD extraction, 7 offices, Seamly chatbot API, modular helpers
+  - `youngcapital/assets.py` - JSON-LD extraction, VAT→KvK conversion, 6 social platforms
+  - `tmi/assets.py` - Healthcare vertical ("Zorg"), review extraction, simplified sectors
 
 **Common Patterns Across All Scrapers**:
 - Structured page tasks with custom functions
@@ -715,12 +714,20 @@ make lint               # Run linter
 make test               # Run tests
 
 # Scraping (single agency)
-uv run dagster asset materialize -m staffing_agency_scraper.definitions -a adecco_scrape
-uv run dagster asset materialize -m staffing_agency_scraper.definitions -a start_people_scrape
+uv run dagster asset materialize -m staffing_agency_scraper.definitions -a yacht_scrape
+uv run dagster asset materialize -m staffing_agency_scraper.definitions -a youngcapital_scrape
+uv run dagster asset materialize -m staffing_agency_scraper.definitions -a tmi_scrape
 
 # Scraping (multiple agencies)
 uv run dagster asset materialize -m staffing_agency_scraper.definitions \
-  -a adecco_scrape -a manpower_scrape -a olympia_scrape
+  -a yacht_scrape -a youngcapital_scrape -a tmi_scrape
+
+# Scraping ALL 15 MVP agencies
+uv run dagster asset materialize -m staffing_agency_scraper.definitions \
+  -a adecco_scrape -a asa_talent_scrape -a brunel_scrape -a covebo_scrape \
+  -a hays_scrape -a maandag_scrape -a manpower_scrape -a michael_page_scrape \
+  -a olympia_scrape -a randstad_scrape -a start_people_scrape -a tempo_team_scrape \
+  -a tmi_scrape -a yacht_scrape -a youngcapital_scrape
 
 # Logging
 tail -f logs/dagster.log                    # View main log
@@ -728,12 +735,12 @@ cat logs/compute_logs/*/compute.out         # View latest run
 ./view_logs.sh                              # Interactive log viewer (if available)
 
 # Output
-cat output/adecco.json                      # View scraped data
-cat output/start_people.json                # View Start People data
+cat output/yacht.json                       # View Yacht data
+cat output/youngcapital.json                # View YoungCapital data
 cat output/tmi.json                         # View TMI data
 grep "role_levels" output/*.json            # Check specific fields across all agencies
 grep "office_locations" output/*.json -c    # Count offices per agency
-ls -lh output/                              # List all 10 completed JSONs
+ls -lh output/                              # List all 15 completed JSONs
 ```
 
 ### Key Files
@@ -780,22 +787,30 @@ Proprietary - inhuren.nl
 ## Project Status
 
 **Last Updated**: December 12, 2025  
-**MVP Progress**: 10/15 agencies completed (67%)  
+**MVP Progress**: ✅ **15/15 agencies completed (100%)** 🎉  
 **Field Coverage**: 67/81 fields implemented (83%)  
 **Utility Functions**: 69 reusable extraction methods in `utils.py`
 
 **Recent Milestones**:
-- ✅ 10 production-ready scrapers with comprehensive data extraction
+- ✅ **ALL 15 MVP SCRAPERS COMPLETED** - Production-ready with comprehensive data extraction
 - ✅ Standardized architecture with `BaseAgencyScraper` + `AgencyScraperUtils`
 - ✅ BeautifulSoup-only approach (removed AI/LLM dependencies)
+- ✅ JSON-LD extraction for structured data (Yacht, YoungCapital, Maandag)
+- ✅ Dutch keyword optimization - 75+ terms for service detection
 - ✅ City-to-province mapping for 50+ Dutch cities
 - ✅ Paginated scraping support for office locations
 - ✅ PDF extraction for legal documents and certifications
-- ✅ API integration support (JSON endpoints, Next.js data)
+- ✅ API integration support (JSON endpoints, Next.js data, Seamly chatbot)
 - ✅ Enhanced logging with source URL tracking
 
+**Latest Additions** (December 12, 2025):
+- ✅ **Yacht** - Randstad Professional, 7 offices, JSON-LD extraction, Seamly chatbot, 9 sectors
+- ✅ **YoungCapital** - Youth-focused, JSON-LD extraction, 6 social platforms, founded 2000
+- ✅ **TMI** - Healthcare vertical simplified to "Zorg", review ratings
+- ✅ **Dutch Service Keywords** - 75+ optimized terms (detacheren, werving, zzp, etc.)
+
 **Next Steps**:
-1. Complete Randstad scraper (in progress)
-2. Add 4 remaining MVP agencies (Tempo-Team, YoungCapital, Covebo, Yacht)
-3. Enhance pricing and review data extraction
-4. Add more growth signals and operational metrics
+1. Enhance pricing and review data extraction
+2. Add more growth signals and operational metrics
+3. Expand to additional agencies beyond MVP 15
+4. Add automated data validation and quality checks
