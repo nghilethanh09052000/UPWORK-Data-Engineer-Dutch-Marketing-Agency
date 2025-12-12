@@ -72,7 +72,7 @@ class TMIScraper(BaseAgencyScraper):
         agency.employers_page_url = f"{self.WEBSITE_URL}/opdrachtgevers"
         agency.contact_form_url = f"{self.WEBSITE_URL}/over-tmi/contact"
         
-        all_sectors = {"core": [], "secondary": []}
+        all_sectors = []
         all_text = ""  # Accumulate text from all pages for utils extraction
         main_soup = None  # Keep homepage soup for portal/review detection
         
@@ -127,13 +127,8 @@ class TMIScraper(BaseAgencyScraper):
                 self.logger.error(f"❌ Error scraping {url}: {e}")
         
         # Finalize sectors
-        if all_sectors.get("core"):
-            agency.sectors_core = sorted(list(set(all_sectors["core"])))
-        if all_sectors.get("secondary"):
-            # Filter out any secondary sectors that are already in core
-            core_set = set(agency.sectors_core)
-            unique_secondary = [s for s in all_sectors["secondary"] if s not in core_set]
-            agency.sectors_secondary = sorted(list(set(unique_secondary)))
+        if all_sectors:
+            agency.sectors_core = sorted(list(set(all_sectors)))
         
         # ==================== APPLY ALL COMMON UTILS EXTRACTIONS ====================
         self.logger.info("=" * 80)
@@ -162,7 +157,7 @@ class TMIScraper(BaseAgencyScraper):
         functions: List[str],
         soup: BeautifulSoup,
         page_text: str,
-        all_sectors: Dict[str, List[str]],
+        all_sectors: List[str],
         url: str,
     ) -> None:
         """Apply BS4/regex extraction functions."""
@@ -389,51 +384,16 @@ class TMIScraper(BaseAgencyScraper):
             agency.office_locations = [hq_office]
     
     def _extract_sectors(
-        self, soup: BeautifulSoup, page_text: str, all_sectors: Dict[str, List[str]], url: str
+        self, soup: BeautifulSoup, page_text: str, all_sectors: List[str], url: str
     ) -> None:
-        """Extract healthcare sectors from category list and navigation."""
-        self.logger.info(f"🔍 Extracting sectors from {url}")
+        """TMI is 100% healthcare-focused - hardcode 'Zorg' as the only sector."""
+        self.logger.info(f"🔍 Setting TMI sector to 'Zorg' (Healthcare)")
         
-        core_sectors = []
-        secondary_sectors = []
-        
-        # Extract core sectors from simple-vacancies-cats
-        cats_div = soup.find("div", class_="simple-vacancies-cats")
-        if cats_div:
-            cat_items = cats_div.find_all("div", class_="cat-item")
-            self.logger.info(f"✓ Found {len(cat_items)} category items | Source: {url}")
-            
-            for cat_item in cat_items:
-                link = cat_item.find("a")
-                if link:
-                    sector_name = link.get_text(strip=True)
-                    # Skip "Overig" (Other/Misc)
-                    if sector_name.lower() != "overig":
-                        core_sectors.append(sector_name)
-                        self.logger.info(f"✓ Core sector: '{sector_name}' | Source: {url}")
-        
-        # Extract secondary sectors from navigation (for additional context)
-        for link in soup.find_all("a"):
-            text = link.get_text(strip=True)
-            healthcare_keywords = [
-                "ambulancezorg", "ziekenhuis", "ggz", "vvt", 
-                "kinderopvang", "jeugdzorg", "gehandicaptenzorg",
-                "apotheek", "huisartsenzorg", "sociaal werk",
-                "paramedici", "verpleegkundige", "zorg", "anios",
-                "operatiekamer", "medisch specialist", "ggd", "arbo"
-            ]
-            
-            # Only add clean sector names (reasonable length, not concatenated)
-            if (any(kw in text.lower() for kw in healthcare_keywords) and 
-                5 < len(text) < 50 and 
-                text not in core_sectors and  # Not already in core
-                text not in secondary_sectors and  # Not already in secondary
-                not any(char.isupper() and text[i-1].islower() for i, char in enumerate(text) if i > 0)):  # Detect camelCase concatenation
-                secondary_sectors.append(text)
-                self.logger.info(f"✓ Secondary sector: '{text}' | Source: {url}")
-        
-        # Store both lists
-        all_sectors.update({"core": core_sectors, "secondary": secondary_sectors})
+        # TMI is exclusively a healthcare staffing agency
+        # All their sub-sectors (Apotheken, Artsen, GGD, etc.) fall under "Zorg"
+        if "Zorg" not in all_sectors:
+            all_sectors.append("Zorg")
+            self.logger.info(f"✓ Sector: 'Zorg' (Healthcare vertical) | Source: {url}")
     
     def _extract_about(
         self, soup: BeautifulSoup, page_text: str, agency: Agency, url: str
