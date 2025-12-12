@@ -52,7 +52,7 @@ class YachtScraper(BaseAgencyScraper):
         
         agency = self.create_base_agency()
         agency.geo_focus_type = GeoFocusType.NATIONAL
-        agency.employers_page_url = f"{self.WEBSITE_URL}/werkgevers"
+        agency.employers_page_url = f"{self.WEBSITE_URL}/opdrachtgevers"
         agency.contact_form_url = f"{self.WEBSITE_URL}/contact"
         
         all_sectors = set()
@@ -60,7 +60,7 @@ class YachtScraper(BaseAgencyScraper):
         for page in self.PAGES_TO_SCRAPE:
             url = page["url"]
             page_name = page["name"]
-            functions = page.get("functions", [])
+            functions = page.get("functions", [])            
             
             try:
                 self.logger.info("=" * 80)
@@ -93,6 +93,7 @@ class YachtScraper(BaseAgencyScraper):
                 if page_name == "home":
                     if self._detect_seamly_chatbot():
                         agency.ai_capabilities.chatbot_for_candidates = True
+                        agency.ai_capabilities.chatbot_for_clients = True
                         self.logger.info(f"✓ Detected Seamly chatbot (API check) | Source: Seamly API")
                 
                 self.logger.info(f"✅ Completed: {page_name}")
@@ -126,9 +127,7 @@ class YachtScraper(BaseAgencyScraper):
         """Apply BS4/regex extraction functions."""
         for func_name in functions:
             if func_name == "logo":
-                logo = self.utils.fetch_logo(soup, url)
-                if logo:
-                    agency.logo_url = logo
+                self._extract_logo(soup, agency, url)
             
             elif func_name == "services":
                 services = self.utils.fetch_services(page_text, url)
@@ -149,12 +148,50 @@ class YachtScraper(BaseAgencyScraper):
             elif func_name == "office_locations":
                 self._extract_office_locations(soup, url, agency)
     
+    def _extract_logo(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
+        """Extract logo from JSON-LD schema."""
+        import json
+        
+        self.logger.info(f"🔍 Extracting logo from JSON-LD schema on {url}")
+        
+        # Find JSON-LD script tags
+        json_ld_scripts = soup.find_all("script", type="application/ld+json")
+        
+        for script in json_ld_scripts:
+            try:
+                data = json.loads(script.string)
+                
+                # Check if this is a Corporation type with logo
+                if data.get("@type") == "Corporation" and "logo" in data:
+                    logo_data = data["logo"]
+                    
+                    if isinstance(logo_data, dict):
+                        logo_url = logo_data.get("url")
+                        if logo_url:
+                            agency.logo_url = logo_url
+                            self.logger.info(f"✓ Logo extracted from JSON-LD: {logo_url} | Source: {url}")
+                            return
+                    elif isinstance(logo_data, str):
+                        agency.logo_url = logo_data
+                        self.logger.info(f"✓ Logo extracted from JSON-LD: {logo_data} | Source: {url}")
+                        return
+                        
+            except (json.JSONDecodeError, KeyError, AttributeError) as e:
+                self.logger.warning(f"⚠ Failed to parse JSON-LD for logo: {e}")
+                continue
+        
+        # Fallback to standard logo extraction if JSON-LD didn't work
+        self.logger.warning(f"Could not find logo in JSON-LD, trying fallback method")
+        logo = self.utils.fetch_logo(soup, url)
+        if logo:
+            agency.logo_url = logo
+    
     def _extract_contact(self, soup: BeautifulSoup, page_text: str, agency: Agency, url: str) -> None:
         """Extract contact information (email, phone, office locations)."""
         email = self.utils.fetch_contact_email(page_text, url)
         phone = self.utils.fetch_contact_phone(page_text, url)
         offices = self.utils.fetch_office_locations(soup, url)
-        
+
         if email:
             agency.contact_email = email
         if phone:
@@ -164,7 +201,7 @@ class YachtScraper(BaseAgencyScraper):
             if offices and not agency.hq_city:
                 agency.hq_city = offices[0].city
                 agency.hq_province = offices[0].province
-    
+            
     def _extract_legal(self, agency: Agency, page_text: str, url: str) -> None:
         """Extract KvK number, legal name, and HQ location from voorwaarden page."""
         import re
@@ -172,12 +209,12 @@ class YachtScraper(BaseAgencyScraper):
         # Extract KvK and legal name
         kvk = self.utils.fetch_kvk_number(page_text, url)
         legal_name = self.utils.fetch_legal_name(page_text, "Yacht", url)
-        
+
         if kvk:
             agency.kvk_number = kvk
         if legal_name:
             agency.legal_name = legal_name
-        
+    
         # Extract HQ from voorwaarden page
         # Dutch: "houdt kantoor te Diemen aan de Diemermere 25"
         # English: "has its office in Diemen at Diemermere 25"
