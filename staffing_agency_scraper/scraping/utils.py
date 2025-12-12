@@ -199,12 +199,12 @@ GROWTH_SIGNAL_KEYWORDS = {
 # Company Size Fit - Detection Keywords
 COMPANY_SIZE_FIT_KEYWORDS = {
     "micro_1_10": [
-        "zzp", "freelance", "eenmanszaak", "startups", "micro bedrijf", 
-        "mkb", "kleine bedrijven", "zelfstandig", "1-10 medewerkers"
+        "freelance", "eenmanszaak", "startups", "micro bedrijf", 
+        "kleine bedrijven", "zelfstandig", "1-10 medewerkers"
     ],
     "smb_11_200": [
-        "mkb", "midden", "klein", "middelgroot bedrijf", "11-200 medewerkers",
-        "familiebedrijf", "sme", "small medium"
+        "klein", "middelgroot bedrijf", "11-200 medewerkers",
+        "familiebedrijf", "small medium"
     ],
     "mid_market_201_1000": [
         "middelgroot", "mid market", "201-1000", "groeiende organisaties",
@@ -215,8 +215,8 @@ COMPANY_SIZE_FIT_KEYWORDS = {
         "1000+ medewerkers", "internationale organisaties", "groot", "Fortune"
     ],
     "public_sector": [
-        "overheid", "publieke sector", "gemeente", "provincie", "rijk",
-        "ministerie", "publiek", "government", "public sector", "zorg",
+        "overheid", "publieke sector", "gemeente", "provincie",
+        "ministerie", "publiek", "government", "public sector",
         "onderwijs", "gemeenten"
     ],
 }
@@ -279,12 +279,49 @@ NO_CURE_NO_PAY_KEYWORDS = [
     "resultaat geen kosten", "risk free", "gratis"
 ]
 
+# Regions Served - Detection Keywords
+REGIONS_KEYWORDS = {
+    # Dutch Provinces
+    "Noord-Holland": ["noord-holland", "noord holland", "province of north holland"],
+    "Zuid-Holland": ["zuid-holland", "zuid holland", "province of south holland"],
+    "Utrecht": ["utrecht", "provincie utrecht", "utrecht region"],
+    "Noord-Brabant": ["noord-brabant", "noord brabant", "brabant", "province of north brabant"],
+    "Gelderland": ["gelderland", "provincie gelderland", "province of gelderland"],
+    "Limburg": ["limburg", "provincie limburg", "province of limburg"],
+    "Overijssel": ["overijssel", "provincie overijssel", "province of overijssel"],
+    "Groningen": ["groningen", "provincie groningen", "groningen region"],
+    "Friesland": ["friesland", "fryslân", "provincie friesland", "province of friesland"],
+    "Flevoland": ["flevoland", "provincie flevoland", "province of flevoland"],
+    "Zeeland": ["zeeland", "provincie zeeland", "province of zeeland"],
+    "Drenthe": ["drenthe", "provincie drenthe", "province of drenthe"],
+    
+    # Regional groupings
+    "Randstad": ["randstad", "randstad region"],
+    "Noord-Nederland": ["noord-nederland", "noord nederland", "northern netherlands"],
+    "Zuid-Nederland": ["zuid-nederland", "zuid nederland", "southern netherlands"],
+    "Oost-Nederland": ["oost-nederland", "oost nederland", "eastern netherlands"],
+    "West-Nederland": ["west-nederland", "west nederland", "western netherlands"],
+    
+    # National coverage
+    "heel_Nederland": [
+        "heel nederland", "geheel nederland", "landelijk", "landelijke dekking",
+        "throughout the netherlands", "nationwide", "national coverage",
+        "alle provincies", "all provinces"
+    ],
+    
+    # International (neighboring countries)
+    "België": ["belgië", "belgium", "belgisch", "belgian"],
+    "Duitsland": ["duitsland", "germany", "duits", "german"],
+    "Luxemburg": ["luxemburg", "luxembourg"],
+}
+
 # City to Province Mapping - Dutch Cities
 CITY_TO_PROVINCE = {
     # Noord-Holland
     "amsterdam": "Noord-Holland", "haarlem": "Noord-Holland", "zaandam": "Noord-Holland",
     "alkmaar": "Noord-Holland", "hoorn": "Noord-Holland", "hoofddorp": "Noord-Holland",
     "purmerend": "Noord-Holland", "beverwijk": "Noord-Holland", "hilversum": "Noord-Holland",
+    "diemen": "Noord-Holland", "amsterdam-duivendrecht": "Noord-Holland", "schiphol": "Noord-Holland",
     "amstelveen": "Noord-Holland", "heerhugowaard": "Noord-Holland", "velsen": "Noord-Holland",
     # Zuid-Holland
     "rotterdam": "Zuid-Holland", "den haag": "Zuid-Holland", "the hague": "Zuid-Holland",
@@ -297,21 +334,26 @@ CITY_TO_PROVINCE = {
     # Utrecht
     "utrecht": "Utrecht", "amersfoort": "Utrecht", "veenendaal": "Utrecht",
     "zeist": "Utrecht", "nieuwegein": "Utrecht", "woerden": "Utrecht",
+    "leerdam": "Utrecht",
     # Noord-Brabant
     "eindhoven": "Noord-Brabant", "tilburg": "Noord-Brabant", "breda": "Noord-Brabant",
     "'s-hertogenbosch": "Noord-Brabant", "den bosch": "Noord-Brabant", "helmond": "Noord-Brabant",
     "oss": "Noord-Brabant", "roosendaal": "Noord-Brabant", "bergen op zoom": "Noord-Brabant",
     "uden": "Noord-Brabant", "veghel": "Noord-Brabant", "veldhoven": "Noord-Brabant",
     "waalwijk": "Noord-Brabant", "oosterhout": "Noord-Brabant", "schijndel": "Noord-Brabant",
+    "deurne": "Noord-Brabant", "etten-leur": "Noord-Brabant", "valkenswaard": "Noord-Brabant",
+    "zevenbergen": "Noord-Brabant",
     # Gelderland
     "nijmegen": "Gelderland", "arnhem": "Gelderland", "apeldoorn": "Gelderland",
     "ede": "Gelderland", "zutphen": "Gelderland", "tiel": "Gelderland",
     "harderwijk": "Gelderland", "zaltbommel": "Gelderland", "zevenaar": "Gelderland",
     "lichtenvoorde": "Gelderland", "doetinchem": "Gelderland", "winterswijk": "Gelderland",
     "didam": "Gelderland", "wageningen": "Gelderland", "barneveld": "Gelderland",
+    "'s heerenberg": "Gelderland", "geldermalsen": "Gelderland", "nijkerk": "Gelderland",
     # Limburg
     "maastricht": "Limburg", "venlo": "Limburg", "roermond": "Limburg",
     "heerlen": "Limburg", "sittard": "Limburg", "sittard-geleen": "Limburg",
+    "weert": "Limburg",
     # Overijssel
     "enschede": "Overijssel", "zwolle": "Overijssel", "almelo": "Overijssel",
     "deventer": "Overijssel", "hengelo": "Overijssel", "kampen": "Overijssel",
@@ -324,6 +366,7 @@ CITY_TO_PROVINCE = {
     "almere": "Flevoland", "lelystad": "Flevoland", "emmeloord": "Flevoland",
     # Zeeland
     "middelburg": "Zeeland", "vlissingen": "Zeeland", "goes": "Zeeland", "terneuzen": "Zeeland",
+    "hulst": "Zeeland", "oostburg": "Zeeland",
     # Drenthe
     "emmen": "Drenthe", "assen": "Drenthe", "hoogeveen": "Drenthe", "meppel": "Drenthe",
 }
@@ -546,6 +589,80 @@ class AgencyScraperUtils:
                         self.logger.info(f"✓ Found office: {city.title()} | Source: {url}")
         
         return offices
+    
+    def fetch_regions_served(self, text: str, url: str) -> List[str]:
+        """
+        Extract geographical regions/provinces served by the agency.
+        
+        Returns list of regions/provinces, which can include:
+        - Specific provinces: "Noord-Holland", "Zuid-Holland", "Utrecht", etc.
+        - Regional groupings: "Randstad", "Noord-Nederland", etc.
+        - National coverage: "heel_Nederland"
+        - International: "België", "Duitsland", "Luxemburg"
+        
+        Args:
+            text: Text to search in (page content)
+            url: URL for logging
+        
+        Returns:
+            List of region names (normalized)
+        
+        Example:
+            >>> utils.fetch_regions_served("Wij zijn actief in heel Nederland", url)
+            ['heel_Nederland']
+            >>> utils.fetch_regions_served("Vestigingen in Noord-Holland en Zuid-Holland", url)
+            ['Noord-Holland', 'Zuid-Holland']
+        """
+        text_lower = text.lower()
+        regions = []
+        
+        # Check for national coverage first (highest priority)
+        for keyword in REGIONS_KEYWORDS["heel_Nederland"]:
+            if self._matches_keyword(keyword, text_lower):
+                if "heel_Nederland" not in regions:
+                    regions.append("heel_Nederland")
+                    self.logger.info(f"✓ Found region: heel_Nederland (national coverage) | Source: {url}")
+                break
+        
+        # If national coverage found, that's usually sufficient
+        # But we can still check for specific mentions
+        
+        # Check for specific provinces
+        provinces = [
+            "Noord-Holland", "Zuid-Holland", "Utrecht", "Noord-Brabant",
+            "Gelderland", "Limburg", "Overijssel", "Groningen",
+            "Friesland", "Flevoland", "Zeeland", "Drenthe"
+        ]
+        
+        for province in provinces:
+            for keyword in REGIONS_KEYWORDS[province]:
+                if self._matches_keyword(keyword, text_lower):
+                    if province not in regions:
+                        regions.append(province)
+                        self.logger.info(f"✓ Found region: {province} | Source: {url}")
+                    break
+        
+        # Check for regional groupings
+        regional_groups = ["Randstad", "Noord-Nederland", "Zuid-Nederland", "Oost-Nederland", "West-Nederland"]
+        for region in regional_groups:
+            for keyword in REGIONS_KEYWORDS[region]:
+                if self._matches_keyword(keyword, text_lower):
+                    if region not in regions:
+                        regions.append(region)
+                        self.logger.info(f"✓ Found region: {region} | Source: {url}")
+                    break
+        
+        # Check for international coverage
+        international = ["België", "Duitsland", "Luxemburg"]
+        for country in international:
+            for keyword in REGIONS_KEYWORDS[country]:
+                if self._matches_keyword(keyword, text_lower):
+                    if country not in regions:
+                        regions.append(country)
+                        self.logger.info(f"✓ Found international region: {country} | Source: {url}")
+                    break
+        
+        return regions
     
     # ========================================================================
     # SECTORS (Normalized list from client)
