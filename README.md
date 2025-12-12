@@ -12,7 +12,7 @@ This project scrapes only **factual company data** from official staffing agency
 
 ### MVP Phase 1: 15 Agencies
 
-**Completed (9/15)**:
+**Completed (10/15)**:
 1. ✅ **Adecco** - Complex scraper with API integration + PDF parsing
 2. ✅ **ASA Talent** - Standard scraper with normalized sectors
 3. ✅ **Brunel** - International agency with JSON extraction
@@ -22,16 +22,16 @@ This project scrapes only **factual company data** from official staffing agency
 7. ✅ **Michael Page** - 4 offices, ISO certifications, Google reviews
 8. ✅ **Olympia** - Paginated offices, SMB focus, ABU CAO
 9. ✅ **Start People** - PDF legal extraction, RGF Staffing group
+10. ✅ **TMI** - Healthcare specialization, review count & rating extraction
 
 **In Progress (1/15)**:
-10. 🔄 **Randstad** - Global HQ, services extraction started
+11. 🔄 **Randstad** - Global HQ, services extraction started
 
-**To Do (5/15)**:
-11. Tempo-Team
-12. YoungCapital
-13. Covebo
-14. Yacht
-15. TMI (Zorg)
+**To Do (4/15)**:
+12. Tempo-Team
+13. YoungCapital
+14. Covebo
+15. Yacht
 
 **Key**: ✅ = Completed | 🔄 = In Progress | All completed scrapers include: logo filtering, sector normalization, portal detection, role levels, review sources, certifications, office locations
 
@@ -74,7 +74,7 @@ All agency scrapers follow a consistent architecture:
 9. **API Integration**: Support for JSON APIs (Adecco jobs API, Next.js data)
 10. **Error Handling**: Comprehensive logging with source URL tracking
 
-**All 9 Completed Scrapers Include**:
+**All 10 Completed Scrapers Include**:
 - ✅ BeautifulSoup-based extraction (no AI/LLM dependencies)
 - ✅ Structured page task system with custom extraction functions
 - ✅ Reusable utility methods from `AgencyScraperUtils` (69 methods)
@@ -174,7 +174,7 @@ uv run dagster asset materialize -m staffing_agency_scraper.definitions \
   -a asa_talent_scrape \
   -a brunel_scrape
 
-# Run all 9 completed scrapers
+# Run all 10 completed scrapers
 uv run dagster asset materialize -m staffing_agency_scraper.definitions \
   -a adecco_scrape \
   -a asa_talent_scrape \
@@ -184,7 +184,8 @@ uv run dagster asset materialize -m staffing_agency_scraper.definitions \
   -a manpower_scrape \
   -a michael_page_scrape \
   -a olympia_scrape \
-  -a start_people_scrape
+  -a start_people_scrape \
+  -a tmi_scrape
 ```
 
 ### Viewing Logs
@@ -215,7 +216,7 @@ cat logs/compute_logs/*/compute.out
 │   │   ├── base.py                 # BaseAgencyScraper class
 │   │   ├── utils.py                # AgencyScraperUtils (69 reusable extraction methods)
 │   │   ├── definitions.py          # Scraping module definitions
-│   │   └── agencies/               # Per-agency scrapers (9/15 complete)
+│   │   └── agencies/               # Per-agency scrapers (10/15 complete)
 │   │       ├── __init__.py
 │   │       ├── adecco/             # ✅ Complex: API + PDF parsing
 │   │       ├── asa_talent/         # ✅ Standard: Normalized sectors
@@ -226,8 +227,9 @@ cat logs/compute_logs/*/compute.out
 │   │       ├── michael_page/       # ✅ Advanced: 4 offices, ISO certs
 │   │       ├── olympia/            # ✅ Medium: Paginated, SMB stats
 │   │       ├── start_people/       # ✅ Medium: PDF legal, RGF group
+│   │       ├── tmi/                # ✅ Healthcare: Review ratings, sectors
 │   │       ├── randstad/           # 🔄 In Progress
-│   │       └── ...                 # 5 agencies to do
+│   │       └── ...                 # 4 agencies to do
 │   ├── lib/
 │   │   ├── fetch.py                # HTTP utilities
 │   │   ├── browser.py              # Playwright utilities (optional)
@@ -248,7 +250,7 @@ cat logs/compute_logs/*/compute.out
 ├── logs/                           # Local log files
 │   ├── dagster.log                 # Main Dagster log
 │   └── compute_logs/               # Per-run execution logs
-├── output/                         # JSON output (9 agencies completed)
+├── output/                         # JSON output (10 agencies completed)
 ├── tests/
 ├── dagster.yaml                    # Dagster logging configuration
 ├── pyproject.toml
@@ -679,6 +681,7 @@ tail -f logs/dagster.log
   - `brunel/assets.py` - International agency, __NEXT_DATA__ extraction
   - `michael_page/assets.py` - Multi-office, ISO certs, takeover policy
   - `maandag/assets.py` - JSON-LD, Next.js data, certification pages
+  - `tmi/assets.py` - Healthcare specialization, review count & rating extraction
 
 **Common Patterns Across All Scrapers**:
 - Structured page tasks with custom functions
@@ -727,9 +730,10 @@ cat logs/compute_logs/*/compute.out         # View latest run
 # Output
 cat output/adecco.json                      # View scraped data
 cat output/start_people.json                # View Start People data
+cat output/tmi.json                         # View TMI data
 grep "role_levels" output/*.json            # Check specific fields across all agencies
 grep "office_locations" output/*.json -c    # Count offices per agency
-ls -lh output/                              # List all 9 completed JSONs
+ls -lh output/                              # List all 10 completed JSONs
 ```
 
 ### Key Files
@@ -775,13 +779,13 @@ Proprietary - inhuren.nl
 
 ## Project Status
 
-**Last Updated**: December 11, 2025  
-**MVP Progress**: 9/15 agencies completed (60%)  
+**Last Updated**: December 12, 2025  
+**MVP Progress**: 10/15 agencies completed (67%)  
 **Field Coverage**: 67/81 fields implemented (83%)  
 **Utility Functions**: 69 reusable extraction methods in `utils.py`
 
 **Recent Milestones**:
-- ✅ 9 production-ready scrapers with comprehensive data extraction
+- ✅ 10 production-ready scrapers with comprehensive data extraction
 - ✅ Standardized architecture with `BaseAgencyScraper` + `AgencyScraperUtils`
 - ✅ BeautifulSoup-only approach (removed AI/LLM dependencies)
 - ✅ City-to-province mapping for 50+ Dutch cities
@@ -792,6 +796,6 @@ Proprietary - inhuren.nl
 
 **Next Steps**:
 1. Complete Randstad scraper (in progress)
-2. Add 5 remaining MVP agencies (Tempo-Team, YoungCapital, Covebo, Yacht, TMI)
+2. Add 4 remaining MVP agencies (Tempo-Team, YoungCapital, Covebo, Yacht)
 3. Enhance pricing and review data extraction
 4. Add more growth signals and operational metrics

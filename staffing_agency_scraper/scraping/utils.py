@@ -227,13 +227,13 @@ CUSTOMER_SEGMENTS_KEYWORDS = {
     "grootbedrijf": ["grootbedrijf", "groot bedrijf", "grote bedrijven", "enterprise"],
     "overheid": ["overheid", "publieke sector", "gemeente", "provincie", "rijk"],
     "zorginstelling": ["zorginstelling", "zorg", "ziekenhuis", "verpleeghuis", "ggz"],
-    "onderwijsinstelling": ["onderwijs", "school", "universiteit", "hogeschool", "mbo"],
+    "onderwijsinstelling": ["onderwijs", "school", "universiteit", "hogeschool"],
 }
 
 # Focus Segments - Detection Keywords
 FOCUS_SEGMENTS_KEYWORDS = {
     "studenten": ["student", "studenten", "bijbaan", "studiebaan"],
-    "young_professionals": ["young professional", "starter", "recent graduate", "hbo", "wo"],
+    "young_professionals": ["young professional", "starter", "recent graduate"],
     "blue_collar": ["logistiek", "productie", "bouw", "technisch", "magazijn", "chauffeur"],
     "white_collar": ["kantoor", "administratie", "finance", "hr", "sales", "marketing"],
     "technisch_specialisten": ["specialist", "engineer", "technisch", "ict", "software"],
@@ -417,6 +417,8 @@ class AgencyScraperUtils:
         
         Client requirement: Only real logos, not banners or hero images.
         """
+        self.logger.info(f"🔍 Fetching logo from {url}")
+        
         # Priority 1: Header/footer logos with PNG/SVG
         for section in soup.select("header, footer, .header, .footer, nav, .navbar"):
             for img in section.find_all("img"):
@@ -460,6 +462,8 @@ class AgencyScraperUtils:
         - Ingeschreven onder nummer: 12345678
         - Chamber of Commerce: 12345678
         """
+        self.logger.info(f"🔍 Fetching KvK number from {url}")
+        
         # Common Dutch KvK patterns
         patterns = [
             # Standard formats with keyword
@@ -499,6 +503,8 @@ class AgencyScraperUtils:
         - About pages
         - Footer sections
         """
+        self.logger.info(f"🔍 Fetching legal name from {url}")
+        
         # Escape agency_name for regex (in case it contains special chars)
         escaped_name = re.escape(agency_name)
         
@@ -535,6 +541,8 @@ class AgencyScraperUtils:
     
     def fetch_contact_email(self, text: str, url: str) -> Optional[str]:
         """Extract generic business email."""
+        self.logger.info(f"🔍 Fetching contact email from {url}")
+        
         email_match = re.search(r'([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})', text)
         if email_match:
             email = email_match.group(1)
@@ -546,6 +554,8 @@ class AgencyScraperUtils:
     
     def fetch_contact_phone(self, text: str, url: str) -> Optional[str]:
         """Extract business phone number."""
+        self.logger.info(f"🔍 Fetching contact phone from {url}")
+        
         phone_patterns = [
             r'\+31[\s-]?\d{1,2}[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}',
             r'0\d{2,3}[\s-]?\d{3}[\s-]?\d{2}[\s-]?\d{2}',
@@ -562,6 +572,8 @@ class AgencyScraperUtils:
     
     def fetch_office_locations(self, soup: BeautifulSoup, url: str) -> List[OfficeLocation]:
         """Extract office locations from page."""
+        self.logger.info(f"🔍 Fetching office locations from {url}")
+        
         offices = []
         
         # Common Dutch cities with province mapping
@@ -613,6 +625,8 @@ class AgencyScraperUtils:
             >>> utils.fetch_regions_served("Vestigingen in Noord-Holland en Zuid-Holland", url)
             ['Noord-Holland', 'Zuid-Holland']
         """
+        self.logger.info(f"🔍 Fetching regions served from {url}")
+        
         text_lower = text.lower()
         regions = []
         
@@ -674,6 +688,8 @@ class AgencyScraperUtils:
         
         Client requirement: Only standard sectors, not work types like "thuiswerk", "oproepkracht".
         """
+        self.logger.info(f"🔍 Fetching sectors from {url}")
+        
         text_lower = text.lower()
         sectors = []
         
@@ -705,6 +721,8 @@ class AgencyScraperUtils:
         - rpo: Recruitment Process Outsourcing
         - executive_search: Executive search / headhunting
         """
+        self.logger.info(f"🔍 Fetching services from {url}")
+        
         text_lower = text.lower()
         
         services = AgencyServices()
@@ -895,6 +913,8 @@ class AgencyScraperUtils:
         Client requirement: Look for specific candidate login indicators.
         Note: Generic "login" is too vague - we need specific evidence.
         """
+        self.logger.info(f"🔍 Detecting candidate portal on {url}")
+        
         text_lower = text.lower()
         url_lower = url.lower()
         
@@ -932,6 +952,8 @@ class AgencyScraperUtils:
         
         Client requirement: Look for "employer portal", "client portal", "werkgever".
         """
+        self.logger.info(f"🔍 Detecting client portal on {url}")
+        
         text_lower = text.lower()
         
         # Check for employer/client-specific text
@@ -972,6 +994,8 @@ class AgencyScraperUtils:
         
         Note: Uses word boundaries to avoid false positives (e.g., "expertise" matching "expert").
         """
+        self.logger.info(f"🔍 Fetching role levels from {url}")
+        
         text_lower = text.lower()
         levels = []
         
@@ -1000,6 +1024,8 @@ class AgencyScraperUtils:
         Client requirement: Extract from footers/"Over ons" pages.
         Return list of {"platform": "Google Reviews", "url": "https://..."}.
         """
+        self.logger.info(f"🔍 Fetching review sources from {url}")
+        
         review_sources = []
         
         # Check all links in footer and body
@@ -1046,6 +1072,8 @@ class AgencyScraperUtils:
         - Acquisitions/mergers
         - International presence
         """
+        self.logger.info(f"🔍 Fetching growth signals from {url}")
+        
         text_lower = text.lower()
         signals = []
         
@@ -1123,6 +1151,8 @@ class AgencyScraperUtils:
         - enterprise_1000_plus
         - public_sector
         """
+        self.logger.info(f"🔍 Fetching company size fit from {url}")
+        
         text_lower = text.lower()
         size_fits = []
         
@@ -1144,6 +1174,8 @@ class AgencyScraperUtils:
         - zorginstelling
         - onderwijsinstelling
         """
+        self.logger.info(f"🔍 Fetching customer segments from {url}")
+        
         text_lower = text.lower()
         segments = []
         
@@ -1166,6 +1198,8 @@ class AgencyScraperUtils:
         - technisch_specialisten
         - zorgprofessionals
         """
+        self.logger.info(f"🔍 Fetching focus segments from {url}")
+        
         text_lower = text.lower()
         segments = []
         
@@ -1173,7 +1207,6 @@ class AgencyScraperUtils:
             if any(self._matches_keyword(keyword, text_lower) for keyword in keywords):
                 segments.append(segment)
                 self.logger.info(f"✓ Found focus segment: {segment} | Source: {url}")
-                self.logger.info(f'Text: {text_lower}')
         
         return list(set(segments))  # Remove duplicates
     
@@ -1188,6 +1221,8 @@ class AgencyScraperUtils:
         - weekend
         - 24_7_bereikbaar
         """
+        self.logger.info(f"🔍 Fetching shift types from {url}")
+        
         text_lower = text.lower()
         shift_types = []
         
@@ -1210,6 +1245,8 @@ class AgencyScraperUtils:
         - weekenddiensten
         - 24_7_bezetting
         """
+        self.logger.info(f"🔍 Fetching typical use cases from {url}")
+        
         text_lower = text.lower()
         use_cases = []
         
@@ -1229,6 +1266,8 @@ class AgencyScraperUtils:
         - snel_schakelen
         - grote_pools_direct_beschikbaar
         """
+        self.logger.info(f"🔍 Fetching speed claims from {url}")
+        
         text_lower = text.lower()
         speed_claims = []
         
@@ -1249,6 +1288,8 @@ class AgencyScraperUtils:
         - massa_50_plus: Mass recruitment (50+ people)
         - unknown
         """
+        self.logger.info(f"🔍 Fetching volume specialisation from {url}")
+        
         text_lower = text.lower()
         
         # Check for mass recruitment indicators
@@ -1287,6 +1328,8 @@ class AgencyScraperUtils:
         - fixed_fee
         - unknown
         """
+        self.logger.info(f"🔍 Fetching pricing model from {url}")
+        
         text_lower = text.lower()
         
         for model, keywords in PRICING_MODEL_KEYWORDS.items():
@@ -1306,6 +1349,8 @@ class AgencyScraperUtils:
         - quote_only: Contact for quote only
         - None: No pricing information found
         """
+        self.logger.info(f"🔍 Fetching pricing transparency from {url}")
+        
         text_lower = text.lower()
         
         # Check for public pricing examples (tariff tables, rate cards, etc.)
@@ -1343,6 +1388,8 @@ class AgencyScraperUtils:
         - False if explicitly stated they don't offer it
         - None if not mentioned
         """
+        self.logger.info(f"🔍 Fetching no cure no pay from {url}")
+        
         text_lower = text.lower()
         
         if any(keyword in text_lower for keyword in NO_CURE_NO_PAY_KEYWORDS):
@@ -1359,6 +1406,8 @@ class AgencyScraperUtils:
         - (min, max) tuple of floats
         - (None, None) if not found
         """
+        self.logger.info(f"🔍 Fetching omrekenfactor from {url}")
+        
         # Pattern: omrekenfactor 1.45, omrekenfactor vanaf 1.4, 1.35-1.55, etc.
         patterns = [
             r'omrekenfactor\s+(?:van\s+)?(\d+[.,]\d+)(?:\s*(?:-|tot)\s*(\d+[.,]\d+))?',
@@ -1385,6 +1434,8 @@ class AgencyScraperUtils:
         - Number of days
         - None if not mentioned
         """
+        self.logger.info(f"🔍 Fetching avg time to fill from {url}")
+        
         text_lower = text.lower()
         
         # Pattern: "binnen 24 uur", "binnen 2 dagen", "binnen een week"
@@ -1415,6 +1466,8 @@ class AgencyScraperUtils:
         - Estimated pool size as integer
         - None if not mentioned
         """
+        self.logger.info(f"🔍 Fetching candidate pool size from {url}")
+        
         # Pattern: "15.000 kandidaten", "5000 professionals in database", etc.
         patterns = [
             r'(\d+[\.,]\d+|\d+)\s+(?:kandidaten|candidates|professionals|medewerkers)\s+(?:in|beschikbaar)',
@@ -1440,6 +1493,8 @@ class AgencyScraperUtils:
         - Estimated annual placements
         - None if not mentioned
         """
+        self.logger.info(f"🔍 Fetching annual placements from {url}")
+        
         # Pattern: "5.000 plaatsingen per jaar", "10000 placements annually", etc.
         patterns = [
             r'(\d+[\.,]\d+|\d+)\s+plaatsingen?\s+(?:per\s+jaar|jaarlijks|annually)',
@@ -1464,6 +1519,8 @@ class AgencyScraperUtils:
         - True if mentioned
         - None if not mentioned
         """
+        self.logger.info(f"🔍 Fetching uses inlenersbeloning from {url}")
+        
         text_lower = text.lower()
         
         if any(keyword in text_lower for keyword in [
@@ -1483,6 +1540,8 @@ class AgencyScraperUtils:
         - False if mentioned after a waiting period
         - None if not mentioned
         """
+        self.logger.info(f"🔍 Fetching applies inlenersbeloning from day 1 from {url}")
+        
         text_lower = text.lower()
         
         if any(keyword in text_lower for keyword in [
@@ -1507,6 +1566,8 @@ class AgencyScraperUtils:
         - Number of weeks
         - None if not mentioned
         """
+        self.logger.info(f"🔍 Fetching min assignment duration from {url}")
+        
         # Pattern: "minimaal 4 weken", "minimum 2 maanden", etc.
         patterns = [
             (r'minim(?:aal|um)\s+(\d+)\s+we+k', lambda w: int(w)),
@@ -1530,6 +1591,8 @@ class AgencyScraperUtils:
         - Number of hours
         - None if not mentioned
         """
+        self.logger.info(f"🔍 Fetching min hours per week from {url}")
+        
         # Pattern: "minimaal 20 uur per week", "minimum 32 uur"
         pattern = r'minim(?:aal|um)\s+(\d+)\s+uur\s+(?:per\s+week)?'
         match = re.search(pattern, text.lower())
@@ -1549,6 +1612,8 @@ class AgencyScraperUtils:
         - (low, high) tuple of floats
         - (None, None) if not found
         """
+        self.logger.info(f"🔍 Fetching avg hourly rate from {url}")
+        
         # Patterns: "€25-35 per uur", "vanaf €20 per uur", "€18,50 per uur"
         patterns = [
             r'€\s*(\d+(?:[.,]\d+)?)\s*-\s*€?\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?uur',  # Range: €25-35 per uur
@@ -1586,6 +1651,8 @@ class AgencyScraperUtils:
         - (rating, count) tuple
         - (None, None) if not found
         """
+        self.logger.info(f"🔍 Fetching review rating and count from {url}")
+        
         # Look for common rating patterns
         rating = None
         count = None
@@ -1625,12 +1692,12 @@ class AgencyScraperUtils:
         
         return (rating, count)
     
-    def fetch_external_review_urls(self, review_sources: List[Dict[str, str]]) -> List[str]:
+    def fetch_external_review_urls(self, review_sources: List[Dict[str, str] | str]) -> List[str]:
         """
         Extract external review URLs from review_sources list.
         
         Args:
-            review_sources: List of dicts with 'platform' and 'url' keys
+            review_sources: List of strings or dicts with 'platform' and 'url' keys
         
         Returns:
             List of external review URLs
@@ -1638,7 +1705,16 @@ class AgencyScraperUtils:
         if not review_sources:
             return []
         
-        urls = [source.get("url") for source in review_sources if source.get("url")]
+        urls = []
+        for source in review_sources:
+            # Handle both string format (e.g., "Google") and dict format (e.g., {"platform": "Google", "url": "..."})
+            if isinstance(source, dict):
+                url = source.get("url")
+                if url:
+                    urls.append(url)
+            # If it's a string, we don't have a URL to extract
+            # (just the platform name like "Google")
+        
         return urls
     
     def fetch_takeover_policy(self, text: str, url: str) -> dict:
@@ -1652,6 +1728,8 @@ class AgencyScraperUtils:
         - overname_fee_hint: str or None
         - overname_contract_reference: str (url) or None
         """
+        self.logger.info(f"🔍 Fetching takeover policy from {url}")
+        
         text_lower = text.lower()
         result = {
             "free_takeover_hours": None,
