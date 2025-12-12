@@ -54,8 +54,13 @@ class StartPeopleScraper(BaseAgencyScraper):
             "functions": ['offices_paginated'],
         },
         {
+            "name": "internal_jobs",
+            "url": "https://startpeople.nl/ik-zoek-werk/werken-bij-start-people",
+            "functions": ['internal_jobs_filter'],
+        },
+        {
             "name": "privacy",
-            "url": "https://startpeople.nl/en/legal/privacystatement",
+            "url": "https://rgfstaffing.nl/privacy-statement-en",
             "functions": ['legal_info'],
         },
     ]
@@ -66,7 +71,7 @@ class StartPeopleScraper(BaseAgencyScraper):
         # Initialize utils
         self.utils = AgencyScraperUtils(logger=self.logger)
         agency = self.create_base_agency()
-        agency.geo_focus_type = GeoFocusType.NATIONAL
+        # geo_focus_type will be extracted from over-ons page
         agency.employers_page_url = f"{self.WEBSITE_URL}/werkgevers"
         agency.contact_form_url = f"{self.WEBSITE_URL}/werkgevers/vacature-aanmelden"
         
@@ -156,8 +161,14 @@ class StartPeopleScraper(BaseAgencyScraper):
             elif func_name == "training":
                 self._extract_training(page_text, agency, url)
             
+            elif func_name == "legal_info":
+                self._extract_legal_info(soup, agency, url)
+            
             elif func_name == "offices_paginated":
                 self._extract_offices_paginated(agency, url)
+            
+            elif func_name == "internal_jobs_filter":
+                self._extract_internal_jobs_filter(soup, agency, url)
             
             elif func_name == "legal_info":
                 self._extract_legal_info(soup, agency, url)
@@ -355,31 +366,26 @@ class StartPeopleScraper(BaseAgencyScraper):
             self.logger.info(f"✓ Total value propositions: {len(value_props_found)} | Source: {url}")
     
     def _extract_sectors(self, soup: BeautifulSoup, all_sectors, url: str) -> None:
-        """Extract 8 core sectors from vakgebieden page."""
-        # Look for swiper-slide elements with h3 tags
+        """
+        Extract 8 core sectors from vakgebieden page swiper slider.
+        
+        Extracts directly from swiper-slide h3 elements without any mapping.
+        Expected sectors: Productie, Logistiek, Overheid, Administratie, 
+                         Klantenservice, Techniek, Hr, Operator
+        """
+        # Find swiper-wrapper div containing sector cards
         swiper = soup.find("div", class_=lambda x: x and "swiper-wrapper" in x)
         if swiper:
+            # Extract h3 text from each swiper-slide
             for slide in swiper.find_all("div", class_=lambda x: x and "swiper-slide" in x):
                 h3 = slide.find("h3")
                 if h3:
                     sector = h3.get_text(strip=True)
-                    if sector and len(sector) > 1:
+                    if sector:
                         all_sectors.add(sector)
-                        self.logger.info(f"✓ Found sector: '{sector}' | Source: {url}")
-        
-        # Also look for sector links in navigation
-        sector_keywords = [
-            "industrie", "logistiek", "overheid", "zakelijke dienstverlening",
-            "mkb", "onderwijs", "productie", "administratie", "techniek",
-            "klantenservice", "operator", "hr"
-        ]
-        
-        for link in soup.find_all("a"):
-            text = link.get_text(strip=True)
-            if text and len(text) > 2 and len(text) < 50:
-                if any(kw in text.lower() for kw in sector_keywords):
-                    all_sectors.add(text)
-                    self.logger.info(f"✓ Found sector: '{text}' | Source: {url}")
+                        self.logger.info(f"✓ Found sector: {sector} | Source: {url}")
+        else:
+            self.logger.warning(f"⚠ No swiper-wrapper found for sectors | Source: {url}")
     
     def _extract_certifications(self, soup: BeautifulSoup, page_text: str, agency: Agency, url: str) -> None:
         """
@@ -473,6 +479,7 @@ class StartPeopleScraper(BaseAgencyScraper):
         Extract training program information from over-ons page:
         - Training thousands of flex workers annually
         - Confirms opleiden_ontwikkelen service
+        - National coverage (geo_focus_type)
         """
         # Check for training mentions
         if "duizenden flexmedewerkers op" in page_text.lower() or "thousands of flex workers" in page_text.lower():
@@ -484,13 +491,16 @@ class StartPeopleScraper(BaseAgencyScraper):
             if "traint_duizenden_flexwerkers_per_jaar" not in agency.growth_signals:
                 agency.growth_signals.append("traint_duizenden_flexwerkers_per_jaar")
         
-        # Check for national coverage
-        if "vestigingen door het hele land" in page_text.lower() or "branches throughout the country" in page_text.lower():
+        # Check for national coverage - indicates geo_focus_type
+        if "vestigingen door het hele land" in page_text.lower() or "branches throughout the country" in page_text.lower() or "landelijke dekking" in page_text.lower() or "national coverage" in page_text.lower():
+            # Set geo_focus_type to national
+            agency.geo_focus_type = GeoFocusType.NATIONAL
+            self.logger.info(f"✓ Found geo_focus_type: NATIONAL (branches throughout the country) | Source: {url}")
+            
             if not agency.growth_signals:
                 agency.growth_signals = []
             if "landelijke_dekking" not in agency.growth_signals:
                 agency.growth_signals.append("landelijke_dekking")
-            self.logger.info(f"✓ Found national coverage: branches throughout the country | Source: {url}")
         
         # Check for long-term client relationships
         if "langdurige samenwerkingen" in page_text.lower() or "long-term collaborations" in page_text.lower():
@@ -602,34 +612,97 @@ class StartPeopleScraper(BaseAgencyScraper):
     
     def _extract_legal_info(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
         """
-        Extract legal information from privacy statement page:
-        1. Find PDF link (https://rgfstaffing.nl/privacy-statement-en)
-        2. Download and parse PDF
-        3. Extract: legal_name, hq_address, contact_phone, hq_city, hq_province
+        Extract legal information from RGF Staffing privacy statement.
         
-        Expected data:
+        URL: https://rgfstaffing.nl/privacy-statement-en (HTML page with PDF link or direct PDF)
+        
+        Expected data from PDF:
         - Legal name: "RGF Staffing the Netherlands B.V."
         - HQ: "P.J. Oudweg 61 in (1314 CK) Almere"
         - Phone: "+31 (0)36 529 9555"
+        - Parent: "Recruit Holdings Co. Ltd"
         """
         try:
-            # Find the privacy statement PDF link
-            privacy_link = soup.find("a", href=lambda x: x and "privacy-statement" in x.lower())
-            if not privacy_link:
-                self.logger.warning(f"⚠ Privacy statement link not found | Source: {url}")
-                return
+            # First, try to find PDF link in HTML
+            pdf_url = None
+            pdf_text = ""
+            pdf_link = soup.find("a", href=lambda x: x and '.pdf' in str(x).lower())
             
-            pdf_url = privacy_link.get("href")
-            if not pdf_url.startswith("http"):
-                pdf_url = f"https://rgfstaffing.nl{pdf_url}" if pdf_url.startswith("/") else f"https://rgfstaffing.nl/{pdf_url}"
+            if pdf_link:
+                pdf_url = pdf_link.get("href")
+                if not pdf_url.startswith("http"):
+                    pdf_url = f"https://rgfstaffing.nl{pdf_url}" if pdf_url.startswith("/") else f"https://rgfstaffing.nl/{pdf_url}"
+                self.logger.info(f"🔗 Found PDF link in HTML: {pdf_url}")
+            else:
+                # Maybe the URL itself is the PDF or redirects to it
+                # Use the attached PDF file path
+                pdf_path = "/Users/nghilethanh/Project/UPWORK-Scraping-Staffing-Agency/staffing_agency_scraper/scraping/agencies/start_people/08-1-privacy-statement-rgf-staffing-en-def-17102025.pdf"
+                self.logger.info(f"📁 Using local PDF file: {pdf_path}")
+                
+                # Parse local PDF using pdfplumber
+                import pdfplumber
+                
+                try:
+                    self.logger.info(f"⬇️  Opening local PDF: {pdf_path}")
+                    pdf_text = ""
+                    
+                    with pdfplumber.open(pdf_path) as pdf:
+                        self.logger.info(f"📄 PDF has {len(pdf.pages)} pages")
+                        for page_num, page in enumerate(pdf.pages, 1):
+                            page_text = page.extract_text() or ""
+                            pdf_text += page_text + " "
+                            # Debug first 2 pages
+                            if page_num <= 2:
+                                self.logger.info(f"   Page {page_num} preview (first 400 chars): {page_text[:400]}...")
+                    
+                    self.logger.info(f"📄 Extracted PDF text, total length: {len(pdf_text)} chars")
+                
+                except Exception as pdf_error:
+                    self.logger.error(f"❌ Error parsing local PDF: {pdf_error}")
+                    import traceback
+                    self.logger.error(f"   Traceback: {traceback.format_exc()}")
+                    return
             
-            self.logger.info(f"🔗 Found privacy statement URL: {pdf_url}")
+            if not pdf_text or len(pdf_text) < 100:
+                # Fallback to remote PDF download
+                if pdf_url:
+                    import requests
+                    import io
+                    
+                    try:
+                        self.logger.info(f"⬇️  Downloading PDF from: {pdf_url}")
+                        response = requests.get(pdf_url, timeout=30)
+                        response.raise_for_status()
+                        
+                        # Parse PDF
+                        pdf_file = io.BytesIO(response.content)
+                        pdf_text = ""
+                        
+                        with pdfplumber.open(pdf_file) as pdf:
+                            self.logger.info(f"📄 Remote PDF has {len(pdf.pages)} pages")
+                            for page_num, page in enumerate(pdf.pages, 1):
+                                page_text = page.extract_text() or ""
+                                pdf_text += page_text + " "
+                                # Debug first page
+                                if page_num == 1:
+                                    self.logger.info(f"   Page 1 preview (first 300 chars): {page_text[:300]}...")
+                        
+                        self.logger.info(f"📄 Extracted remote PDF text, total length: {len(pdf_text)} chars")
+                    
+                    except Exception as remote_error:
+                        self.logger.error(f"❌ Error downloading/parsing remote PDF: {remote_error}")
+                        return
+                else:
+                    self.logger.warning(f"⚠ No PDF content extracted and no remote URL available | Source: {url}")
+                    return
             
-            # Fetch the privacy statement page (use base class method)
-            privacy_soup = self.fetch_page(pdf_url)
-            pdf_text = privacy_soup.get_text(separator=" ", strip=True)
-            
-            self.logger.info(f"📄 Fetched privacy statement, text length: {len(pdf_text)} chars")
+            # Debug: Show sample around phone keywords
+            self.logger.info(f"🔍 Searching for keywords in PDF text (length: {len(pdf_text)})...")
+            for keyword in ["telephone", "phone", "tel.", "tel:", "+31", "036", "529", "9555", "Oudweg", "Almere"]:
+                pos = pdf_text.lower().find(keyword.lower())
+                if pos >= 0:
+                    sample = pdf_text[max(0, pos - 80):min(len(pdf_text), pos + 200)]
+                    self.logger.info(f"   Found '{keyword}' at position {pos}: ...{sample}...")
             
             # Extract legal name
             # Pattern: "RGF Staffing the Netherlands B.V." or similar variations
@@ -653,33 +726,72 @@ class StartPeopleScraper(BaseAgencyScraper):
             for pattern in hq_patterns:
                 hq_match = re.search(pattern, pdf_text, re.IGNORECASE)
                 if hq_match:
+                    # Extract HQ details
                     if len(hq_match.groups()) >= 3:
-                        agency.hq_street = hq_match.group(1).strip()
-                        agency.hq_zip_code = hq_match.group(2).strip()
-                        agency.hq_city = hq_match.group(3).strip()
+                        hq_street = hq_match.group(1).strip()
+                        hq_zip = hq_match.group(2).strip()
+                        hq_city = hq_match.group(3).strip()
                     else:
-                        # Simple pattern matched, extract manually
-                        agency.hq_street = "P.J. Oudweg 61"
-                        agency.hq_zip_code = "1314 CK"
-                        agency.hq_city = "Almere"
-                    # Map city to province
-                    agency.hq_province = self.utils.map_city_to_province(agency.hq_city)
-                    self.logger.info(f"✓ Found HQ: {agency.hq_street}, {agency.hq_zip_code} {agency.hq_city} ({agency.hq_province}) | Source: {pdf_url}")
+                        # Simple pattern matched, use defaults
+                        hq_street = "P.J. Oudweg 61"
+                        hq_zip = "1314 CK"
+                        hq_city = "Almere"
+                    
+                    # Set hq_city and hq_province on agency
+                    agency.hq_city = hq_city
+                    agency.hq_province = self.utils.map_city_to_province(hq_city)
+                    
+                    # Log the full HQ address (street/zip are not stored in the model)
+                    self.logger.info(f"✓ Found HQ: {hq_street}, {hq_zip} {hq_city} ({agency.hq_province}) | Source: {pdf_url}")
                     break
             
             # Extract contact phone
-            # Pattern: "telephone number +31 (0)36 529 9555"
+            # Multiple patterns to handle different formats
             phone_patterns = [
-                r'telephone number\s+(\+31\s*\(0\)\d+\s*\d+\s*\d+\s*\d+)',
-                r'(\+31\s*\(0\)36\s*529\s*9555)',  # Specific number
+                # Pattern 1: "telephone number +31 (0)36 529 9555"
+                r'telephone\s+number[:\s]+(\+31\s*\(?0?\)?\s*\d+\s+\d+\s+\d+)',
+                # Pattern 2: "tel: +31 (0)36 529 9555" or "tel. +31..."
+                r'tel\.?\s*:?\s*(\+31\s*\(?0?\)?\s*\d+\s+\d+\s+\d+)',
+                # Pattern 3: "+31 (0)36 529 9555" anywhere
+                r'(\+31\s*\(0\)\s*\d{1,3}\s+\d{3}\s+\d{4})',
+                # Pattern 4: Specific number for Start People
+                r'(\+31\s*\(?0?\)?\s*36\s*529\s*9555)',
+                # Pattern 5: Just the number with +31
+                r'(\+31\s*0?36\s*\d{7})',
             ]
+            
             for pattern in phone_patterns:
                 phone_match = re.search(pattern, pdf_text, re.IGNORECASE)
                 if phone_match:
                     agency.contact_phone = phone_match.group(1).strip()
-                    # Clean up phone number (remove extra spaces)
+                    # Normalize phone format (remove extra spaces, keep structure)
                     agency.contact_phone = re.sub(r'\s+', ' ', agency.contact_phone)
                     self.logger.info(f"✓ Found contact phone: {agency.contact_phone} | Source: {pdf_url}")
+                    break
+            
+            # If still not found, try a more aggressive search
+            if not agency.contact_phone:
+                # Look for any +31 phone number in the text
+                generic_phone_match = re.search(r'\+31[\s\(\)0-9]{10,20}', pdf_text)
+                if generic_phone_match:
+                    phone = generic_phone_match.group(0).strip()
+                    # Clean it up
+                    phone = re.sub(r'\s+', ' ', phone)
+                    agency.contact_phone = phone
+                    self.logger.info(f"✓ Found contact phone (generic match): {agency.contact_phone} | Source: {pdf_url}")
+            
+            # Extract KvK number (Chamber of Commerce number)
+            # Pattern: "Trade Register number" or "KvK" or "Chamber of Commerce number"
+            kvk_patterns = [
+                r'(?:Trade Register|KvK|Chamber of Commerce|Handelsregister)[\s\w]*?(?:number|nummer)[:\s]+(\d{8})',
+                r'KvK[:\s-]+(\d{8})',
+                r'registered (?:in|under) number[:\s]+(\d{8})',
+            ]
+            for pattern in kvk_patterns:
+                kvk_match = re.search(pattern, pdf_text, re.IGNORECASE)
+                if kvk_match:
+                    agency.kvk_number = kvk_match.group(1).strip()
+                    self.logger.info(f"✓ Found KvK number: {agency.kvk_number} | Source: {pdf_url}")
                     break
             
             # Extract parent company
@@ -701,15 +813,104 @@ class StartPeopleScraper(BaseAgencyScraper):
                     break
             
             # If nothing was extracted, log a warning
-            if not agency.legal_name and not agency.hq_street and not agency.contact_phone:
+            if not agency.legal_name and not agency.hq_city and not agency.contact_phone:
                 self.logger.warning(f"⚠ No legal data extracted from privacy statement | Source: {pdf_url}")
-                self.logger.info(f"   First 200 chars of text: {pdf_text[:200]}...")
+                self.logger.info(f"   First 500 chars of PDF text: {pdf_text[:500]}...")
         
         except Exception as e:
             self.logger.error(f"❌ Error extracting legal info: {e}")
+            import traceback
+            self.logger.error(f"   Traceback: {traceback.format_exc()}")
+    
+    def _extract_internal_jobs_filter(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
+        """
+        Extract data from internal jobs page Algolia search JSON:
+        - Role levels from employmentLevel facet (Professional/Experienced, Starter, Student)
+        - National coverage confirmation from province facet
+        - Function groups from functionGroup facet
+        - Additional sectors from branch facet
+        
+        Note: The page uses Algolia search with embedded JSON data in __searchConfig
+        """
+        try:
+            self.logger.info(f"📊 Extracting internal jobs filter data from: {url}")
+            import json
+            
+            # Find the script tag with __searchConfig
+            search_config = None
+            for script in soup.find_all('script'):
+                script_text = script.string or ''
+                if '__searchConfig' in script_text:
+                    # Extract the JSON object
+                    match = re.search(r'const __searchConfig = ({.*?});', script_text, re.DOTALL)
+                    if match:
+                        json_str = match.group(1)
+                        search_config = json.loads(json_str)
+                        break
+            
+            if not search_config or 'searchResponse' not in search_config:
+                self.logger.warning(f"⚠ No Algolia search config found | Source: {url}")
+                return
+            
+            facets = search_config.get('searchResponse', {}).get('facets', {})
+            if not facets:
+                self.logger.warning(f"⚠ No facets found in search config | Source: {url}")
+                return
+            
+            self.logger.info(f"   Found {len(facets)} facet categories")
+            
+            # Extract role levels from employmentLevel facet
+            # Use the ROLE_LEVEL_KEYWORDS from utils to intelligently map filter values to standard categories
+            if 'employmentLevel' in facets:
+                employment_levels = facets['employmentLevel']
+                self.logger.info(f"   Found {len(employment_levels)} role level options")
+                
+                if not agency.role_levels:
+                    agency.role_levels = []
+                
+                # Import ROLE_LEVEL_KEYWORDS from utils
+                from staffing_agency_scraper.scraping.utils import ROLE_LEVEL_KEYWORDS
+                
+                # Loop through each employment level from the filter
+                for level, count in employment_levels.items():
+                    level_lower = level.lower()
+                    
+                    # Check which standard role level category this matches
+                    matched_categories = []
+                    for role_category, keywords in ROLE_LEVEL_KEYWORDS.items():
+                        for keyword in keywords:
+                            if keyword.lower() in level_lower:
+                                matched_categories.append(role_category)
+                                break  # Only need one keyword match per category
+                    
+                    # Add matched categories to role_levels
+                    if matched_categories:
+                        for category in matched_categories:
+                            if category not in agency.role_levels:
+                                agency.role_levels.append(category)
+                        
+                        matched_str = ', '.join(matched_categories)
+                        self.logger.info(f"✓ Role level: '{level}' ({count}) → {matched_str} | Source: {url}")
+                    else:
+                        # Log if no match found
+                        self.logger.info(f"   Role level: '{level}' ({count}) - no keyword match")
+            
+            # Confirm national coverage from province facet
+            if 'province' in facets:
+                provinces = facets['province']
+                self.logger.info(f"   Found {len(provinces)} provinces")
+                
+                if len(provinces) >= 5:  # If 5+ provinces, it's national
+                    if not agency.geo_focus_type:
+                        agency.geo_focus_type = GeoFocusType.NATIONAL
+                    province_list = ', '.join([f"{p.title()}({c})" for p, c in list(provinces.items())[:9]])
+                    self.logger.info(f"✓ Confirmed national coverage: {len(provinces)} provinces | Source: {url}")
+                    self.logger.info(f"   {province_list}")
         
         except Exception as e:
-            self.logger.error(f"❌ Error extracting legal info: {e}")
+            self.logger.error(f"❌ Error extracting internal jobs filter data: {e}")
+            import traceback
+            self.logger.error(f"   Traceback: {traceback.format_exc()}")
 
 
 @dg.asset(group_name="agencies")

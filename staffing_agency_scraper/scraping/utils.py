@@ -345,6 +345,25 @@ class AgencyScraperUtils:
         """
         self.logger = logger
     
+    def _matches_keyword(self, keyword: str, text: str) -> bool:
+        """
+        Check if a keyword matches in text using word boundaries.
+        
+        This prevents false positives like:
+        - "senior" matching "seniorim"
+        - "expert" matching "expertise"
+        - "abu" matching "abusive"
+        
+        Args:
+            keyword: The keyword to search for (will be escaped)
+            text: The text to search in (should be lowercase)
+        
+        Returns:
+            True if keyword found as a whole word, False otherwise
+        """
+        pattern = r'\b' + re.escape(keyword) + r'\b'
+        return bool(re.search(pattern, text))
+    
     # ========================================================================
     # BASIC IDENTITY (Fields 1-10 from _sample.json)
     # ========================================================================
@@ -544,7 +563,7 @@ class AgencyScraperUtils:
         # Use the global SECTOR_KEYWORDS mapping
         for sector, keywords in SECTOR_KEYWORDS.items():
             for keyword in keywords:
-                if keyword in text_lower and sector not in sectors:
+                if self._matches_keyword(keyword, text_lower) and sector not in sectors:
                     sectors.append(sector)
                     self.logger.info(f"✓ Found sector: {sector} | Source: {url}")
                     break
@@ -637,19 +656,19 @@ class AgencyScraperUtils:
             # Search through each page separately for better logging
             for page_url, page_text in text.items():
                 text_lower = page_text.lower()
-                if "abu" in text_lower:
+                if self._matches_keyword("abu", text_lower):
                     self.logger.info(f"✓ Found CAO: ABU | Source: {page_url}")
                     return CaoType.ABU
-                elif "nbbu" in text_lower:
+                elif self._matches_keyword("nbbu", text_lower):
                     self.logger.info(f"✓ Found CAO: NBBU | Source: {page_url}")
                     return CaoType.NBBU
         else:
             # Old API: single string
             text_lower = text.lower()
-            if "abu" in text_lower:
+            if self._matches_keyword("abu", text_lower):
                 self.logger.info(f"✓ Found CAO: ABU | Source: {url}")
                 return CaoType.ABU
-            elif "nbbu" in text_lower:
+            elif self._matches_keyword("nbbu", text_lower):
                 self.logger.info(f"✓ Found CAO: NBBU | Source: {url}")
                 return CaoType.NBBU
         
@@ -670,25 +689,25 @@ class AgencyScraperUtils:
             # Search through each page separately for better logging
             for page_url, page_text in text.items():
                 text_lower = page_text.lower()
-                if "abu" in text_lower and "ABU" not in membership:
+                if self._matches_keyword("abu", text_lower) and "ABU" not in membership:
                     membership.append("ABU")
                     self.logger.info(f"✓ Found membership: ABU | Source: {page_url}")
-                if "nbbu" in text_lower and "NBBU" not in membership:
+                if self._matches_keyword("nbbu", text_lower) and "NBBU" not in membership:
                     membership.append("NBBU")
                     self.logger.info(f"✓ Found membership: NBBU | Source: {page_url}")
-                if "nrto" in text_lower and "NRTO" not in membership:
+                if self._matches_keyword("nrto", text_lower) and "NRTO" not in membership:
                     membership.append("NRTO")
                     self.logger.info(f"✓ Found membership: NRTO | Source: {page_url}")
         else:
             # Old API: single string
             text_lower = text.lower()
-            if "abu" in text_lower:
+            if self._matches_keyword("abu", text_lower):
                 membership.append("ABU")
                 self.logger.info(f"✓ Found membership: ABU | Source: {url}")
-            if "nbbu" in text_lower:
+            if self._matches_keyword("nbbu", text_lower):
                 membership.append("NBBU")
                 self.logger.info(f"✓ Found membership: NBBU | Source: {url}")
-            if "nrto" in text_lower:
+            if self._matches_keyword("nrto", text_lower):
                 membership.append("NRTO")
                 self.logger.info(f"✓ Found membership: NRTO | Source: {url}")
         
@@ -735,14 +754,14 @@ class AgencyScraperUtils:
             for page_url, page_text in text.items():
                 text_lower = page_text.lower()
                 for keyword, cert_name in cert_keywords.items():
-                    if keyword in text_lower and cert_name not in certs:
+                    if self._matches_keyword(keyword, text_lower) and cert_name not in certs:
                         certs.append(cert_name)
                         self.logger.info(f"✓ Found certification: {cert_name} | Source: {page_url}")
         else:
             # Old API: single string
             text_lower = text.lower()
             for keyword, cert_name in cert_keywords.items():
-                if keyword in text_lower and cert_name not in certs:
+                if self._matches_keyword(keyword, text_lower) and cert_name not in certs:
                     certs.append(cert_name)
                     self.logger.info(f"✓ Found certification: {cert_name} | Source: {url}")
         
@@ -914,12 +933,12 @@ class AgencyScraperUtils:
         signals = []
         
         # National coverage
-        if any(keyword in text_lower for keyword in GROWTH_SIGNAL_KEYWORDS["landelijke_dekking"]):
+        if any(self._matches_keyword(keyword, text_lower) for keyword in GROWTH_SIGNAL_KEYWORDS["landelijke_dekking"]):
             signals.append("landelijke_dekking")
             self.logger.info(f"✓ Found growth signal: landelijke_dekking | Source: {url}")
         
         # International presence
-        if any(keyword in text_lower for keyword in GROWTH_SIGNAL_KEYWORDS["internationale_groep"]):
+        if any(self._matches_keyword(keyword, text_lower) for keyword in GROWTH_SIGNAL_KEYWORDS["internationale_groep"]):
             signals.append("onderdeel_van_internationale_groep")
             self.logger.info(f"✓ Found growth signal: onderdeel_van_internationale_groep | Source: {url}")
         
@@ -936,7 +955,7 @@ class AgencyScraperUtils:
                 self.logger.info(f"✓ Found growth signal: sinds_{year}_actief | Source: {url}")
         
         # Stock exchange listing
-        if any(keyword in text_lower for keyword in GROWTH_SIGNAL_KEYWORDS["beursgenoteerd"]):
+        if any(self._matches_keyword(keyword, text_lower) for keyword in GROWTH_SIGNAL_KEYWORDS["beursgenoteerd"]):
             signals.append("beursgenoteerd")
             self.logger.info(f"✓ Found growth signal: beursgenoteerd | Source: {url}")
         
@@ -949,7 +968,7 @@ class AgencyScraperUtils:
                 self.logger.info(f"✓ Found growth signal: {count}_plus_kantoren | Source: {url}")
         
         # Acquisitions
-        if any(keyword in text_lower for keyword in GROWTH_SIGNAL_KEYWORDS["overnames"]):
+        if any(self._matches_keyword(keyword, text_lower) for keyword in GROWTH_SIGNAL_KEYWORDS["overnames"]):
             signals.append("overnames_gedaan")
             self.logger.info(f"✓ Found growth signal: overnames_gedaan | Source: {url}")
         
@@ -962,7 +981,7 @@ class AgencyScraperUtils:
                 self.logger.info(f"✓ Found growth signal: actief_in_{count}_landen | Source: {url}")
         
         # Awards and certifications (growth indicator)
-        if any(keyword in text_lower for keyword in GROWTH_SIGNAL_KEYWORDS["awards"]):
+        if any(self._matches_keyword(keyword, text_lower) for keyword in GROWTH_SIGNAL_KEYWORDS["awards"]):
             signals.append("awards_ontvangen")
             self.logger.info(f"✓ Found growth signal: awards_ontvangen | Source: {url}")
         
@@ -991,9 +1010,7 @@ class AgencyScraperUtils:
         size_fits = []
         
         for size_category, keywords in COMPANY_SIZE_FIT_KEYWORDS.items():
-            if any(keyword in text_lower for keyword in keywords):
-                # print(f"Found company size fit: {size_category} | Source: {url}")
-                # print('text', text_lower)
+            if any(self._matches_keyword(keyword, text_lower) for keyword in keywords):
                 size_fits.append(size_category)
                 self.logger.info(f"✓ Found company size fit: {size_category} | Source: {url}")
         
@@ -1014,7 +1031,7 @@ class AgencyScraperUtils:
         segments = []
         
         for segment, keywords in CUSTOMER_SEGMENTS_KEYWORDS.items():
-            if any(keyword in text_lower for keyword in keywords):
+            if any(self._matches_keyword(keyword, text_lower) for keyword in keywords):
                 segments.append(segment)
                 self.logger.info(f"✓ Found customer segment: {segment} | Source: {url}")
         
@@ -1036,7 +1053,7 @@ class AgencyScraperUtils:
         segments = []
         
         for segment, keywords in FOCUS_SEGMENTS_KEYWORDS.items():
-            if any(keyword in text_lower for keyword in keywords):
+            if any(self._matches_keyword(keyword, text_lower) for keyword in keywords):
                 segments.append(segment)
                 self.logger.info(f"✓ Found focus segment: {segment} | Source: {url}")
                 self.logger.info(f'Text: {text_lower}')
@@ -1058,7 +1075,7 @@ class AgencyScraperUtils:
         shift_types = []
         
         for shift_type, keywords in SHIFT_TYPES_KEYWORDS.items():
-            if any(keyword in text_lower for keyword in keywords):
+            if any(self._matches_keyword(keyword, text_lower) for keyword in keywords):
                 shift_types.append(shift_type)
                 self.logger.info(f"✓ Found shift type: {shift_type} | Source: {url}")
         
@@ -1080,7 +1097,7 @@ class AgencyScraperUtils:
         use_cases = []
         
         for use_case, keywords in TYPICAL_USE_CASES_KEYWORDS.items():
-            if any(keyword in text_lower for keyword in keywords):
+            if any(self._matches_keyword(keyword, text_lower) for keyword in keywords):
                 use_cases.append(use_case)
                 self.logger.info(f"✓ Found typical use case: {use_case} | Source: {url}")
         
@@ -1099,7 +1116,7 @@ class AgencyScraperUtils:
         speed_claims = []
         
         for claim, keywords in SPEED_CLAIMS_KEYWORDS.items():
-            if any(keyword in text_lower for keyword in keywords):
+            if any(self._matches_keyword(keyword, text_lower) for keyword in keywords):
                 speed_claims.append(claim)
                 self.logger.info(f"✓ Found speed claim: {claim} | Source: {url}")
         
