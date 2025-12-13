@@ -16,6 +16,7 @@ from staffing_agency_scraper.models import (
     AgencyServices,
     CaoType,
     OfficeLocation,
+    PhaseSystem,
 )
 
 
@@ -226,7 +227,7 @@ CUSTOMER_SEGMENTS_KEYWORDS = {
     "MKB": ["mkb", "midden- en kleinbedrijf", "kleine bedrijven", "middelgroot"],
     "grootbedrijf": ["grootbedrijf", "groot bedrijf", "grote bedrijven", "enterprise"],
     "overheid": ["overheid", "publieke sector", "gemeente", "provincie", "rijk"],
-    "zorginstelling": ["zorginstelling", "zorg", "ziekenhuis", "verpleeghuis", "ggz"],
+    "zorginstelling": ["zorginstelling", "ziekenhuis", "verpleeghuis", "ggz"],
     "onderwijsinstelling": ["onderwijs", "school", "universiteit", "hogeschool"],
 }
 
@@ -888,18 +889,117 @@ class AgencyScraperUtils:
         
         return membership
     
-    def fetch_phase_system(self, text: str, url: str) -> Optional[str]:
-        """Extract phase system (fasensysteem)."""
+    def fetch_phase_system(self, text: str, url: str) -> Optional[PhaseSystem]:
+        """
+        Extract phase system (fasensysteem) for ABU or NBBU CAO.
+        
+        Returns PhaseSystem object with:
+        - abu_phases: List of phase letters (e.g., ["A", "B", "C"]) if ABU phases mentioned
+        - nbbu_phases: List of phase letters (e.g., ["A", "B", "C"]) if NBBU phases mentioned
+        
+        Detects phase letters (A, B, C, D) and determines if they're ABU or NBBU based on context.
+        """
+        self.logger.info(f"🔍 Fetching phase system from {url}")
+        
         text_lower = text.lower()
+        phase_system = PhaseSystem()
         
-        if "3 fasen" in text_lower or "3 phases" in text_lower:
-            self.logger.info(f"✓ Found phase_system: 3_fasen | Source: {url}")
-            return "3_fasen"
-        elif "4 fasen" in text_lower or "4 phases" in text_lower:
-            self.logger.info(f"✓ Found phase_system: 4_fasen | Source: {url}")
-            return "4_fasen"
+        # Check if text mentions ABU or NBBU to determine context
+        is_abu_context = self._matches_keyword("abu", text_lower)
+        is_nbbu_context = self._matches_keyword("nbbu", text_lower)
         
-        return None
+        # Pattern to find phase letters: "fase A", "fase B", "phase C", etc.
+        # Also handles: "A-fase", "B-fase", "fase 1 (A)", etc.
+        phase_patterns = [
+            r'fase\s+([A-D])',  # "fase A", "fase B"
+            r'([A-D])-?fase',  # "A-fase", "B-fase"
+            r'fase\s+\d+\s*\(([A-D])\)',  # "fase 1 (A)"
+            r'phase\s+([A-D])',  # "phase A", "phase B"
+            r'([A-D])\s+phase',  # "A phase", "B phase"
+        ]
+        
+        found_phases = set()
+        for pattern in phase_patterns:
+            matches = re.findall(pattern, text_lower, re.IGNORECASE)
+            for match in matches:
+                phase_letter = match.upper()
+                if phase_letter in ['A', 'B', 'C', 'D']:
+                    found_phases.add(phase_letter)
+        
+        if found_phases:
+            phases_list = sorted(list(found_phases))  # Sort: A, B, C, D
+            
+            # Determine if ABU or NBBU based on context
+            if is_abu_context and not is_nbbu_context:
+                phase_system.abu_phases = phases_list
+                self.logger.info(f"✓ Found ABU phases: {phases_list} | Source: {url}")
+            elif is_nbbu_context and not is_abu_context:
+                phase_system.nbbu_phases = phases_list
+                self.logger.info(f"✓ Found NBBU phases: {phases_list} | Source: {url}")
+            elif is_abu_context and is_nbbu_context:
+                # Both mentioned - try to determine from context
+                # Check which one is mentioned closer to the phase info
+                abu_pos = text_lower.find("abu")
+                nbbu_pos = text_lower.find("nbbu")
+                
+                # Find the position of the first phase mention
+                phase_positions = []
+                for phase in phases_list:
+                    for pattern in phase_patterns:
+                        match = re.search(pattern, text_lower, re.IGNORECASE)
+                        if match:
+                            phase_positions.append(match.start())
+                            break
+                
+                if phase_positions:
+                    phase_pos = min(phase_positions)
+                    if abs(abu_pos - phase_pos) < abs(nbbu_pos - phase_pos):
+                        phase_system.abu_phases = phases_list
+                        self.logger.info(f"✓ Found ABU phases: {phases_list} (closer to ABU mention) | Source: {url}")
+                    else:
+                        phase_system.nbbu_phases = phases_list
+                        self.logger.info(f"✓ Found NBBU phases: {phases_list} (closer to NBBU mention) | Source: {url}")
+                else:
+                    # Can't determine proximity, default to ABU
+                    phase_system.abu_phases = phases_list
+                    self.logger.info(f"✓ Found phases: {phases_list} (both ABU and NBBU mentioned, defaulting to ABU) | Source: {url}")
+            else:
+                # No clear CAO context, but phases found
+                # Default to ABU if no context (ABU is more common)
+                phase_system.abu_phases = phases_list
+                self.logger.info(f"✓ Found phases: {phases_list} (defaulting to ABU, no CAO context) | Source: {url}")
+        
+        # Also check for numeric phase counts (3 fasen, 4 fasen) as fallback
+        # If we found phases, we already have them. Otherwise, check for counts.
+        if not found_phases:
+            if "3 fasen" in text_lower or "3 phases" in text_lower:
+                # 3-phase system typically means A, B, C
+                if is_abu_context:
+                    phase_system.abu_phases = ["A", "B", "C"]
+                    self.logger.info(f"✓ Found ABU 3-phase system: ['A', 'B', 'C'] | Source: {url}")
+                elif is_nbbu_context:
+                    phase_system.nbbu_phases = ["A", "B", "C"]
+                    self.logger.info(f"✓ Found NBBU 3-phase system: ['A', 'B', 'C'] | Source: {url}")
+                else:
+                    phase_system.abu_phases = ["A", "B", "C"]
+                    self.logger.info(f"✓ Found 3-phase system: ['A', 'B', 'C'] (defaulting to ABU) | Source: {url}")
+            elif "4 fasen" in text_lower or "4 phases" in text_lower:
+                # 4-phase system typically means A, B, C, D
+                if is_abu_context:
+                    phase_system.abu_phases = ["A", "B", "C", "D"]
+                    self.logger.info(f"✓ Found ABU 4-phase system: ['A', 'B', 'C', 'D'] | Source: {url}")
+                elif is_nbbu_context:
+                    phase_system.nbbu_phases = ["A", "B", "C", "D"]
+                    self.logger.info(f"✓ Found NBBU 4-phase system: ['A', 'B', 'C', 'D'] | Source: {url}")
+                else:
+                    phase_system.abu_phases = ["A", "B", "C", "D"]
+                    self.logger.info(f"✓ Found 4-phase system: ['A', 'B', 'C', 'D'] (defaulting to ABU) | Source: {url}")
+        
+        # Return None if no phases found, otherwise return the PhaseSystem object
+        if phase_system.abu_phases is None and phase_system.nbbu_phases is None:
+            return None
+        
+        return phase_system
     
     def fetch_certifications(self, text: str | Dict[str, str], url: str = "accumulated_text") -> List[str]:
         """

@@ -6,12 +6,15 @@ Website: https://www.youngcapital.nl
 
 from __future__ import annotations
 
+import io
 from typing import Any, Dict, List, Set
 
 import dagster as dg
+import pdfplumber
+import requests
 from bs4 import BeautifulSoup
 
-from staffing_agency_scraper.models import Agency, GeoFocusType, OfficeLocation
+from staffing_agency_scraper.models import Agency, AgencyServices, GeoFocusType, OfficeLocation
 from staffing_agency_scraper.scraping.base import BaseAgencyScraper
 from staffing_agency_scraper.scraping.utils import AgencyScraperUtils
 
@@ -52,6 +55,21 @@ class YoungCapitalScraper(BaseAgencyScraper):
             "url": "https://www.youngcapital.nl/uitzendbureau",
             "functions": ['office_locations'],
         },
+        {
+            "name": "diensten",
+            "url": "https://www.youngcapital.nl/werkgevers/diensten",
+            "functions": ['services_detailed'],
+        },
+        {
+            "name": "over_yc",
+            "url": "https://www.youngcapital.nl/over-yc",
+            "functions": ['statistics', 'growth_signals'],
+        },
+        {
+            "name": "algemene_voorwaarden",
+            "url": "https://www.youngcapital.nl/over-yc/algemenevoorwaarden",
+            "functions": ['terms_conditions'],
+        },
     ]
 
     def scrape(self) -> Agency:
@@ -67,6 +85,9 @@ class YoungCapitalScraper(BaseAgencyScraper):
         agency.contact_form_url = f"{self.WEBSITE_URL}/contact"
         
         all_sectors = set()
+        all_text = ""  # Accumulate text from all pages for utils extraction
+        main_soup = None  # Keep homepage soup for portal/review detection
+        
         
         for page in self.PAGES_TO_SCRAPE:
             url = page["url"]
@@ -81,6 +102,13 @@ class YoungCapitalScraper(BaseAgencyScraper):
                 # Fetch with BS4
                 soup = self.fetch_page(url)
                 page_text = soup.get_text(separator=" ", strip=True)
+
+                # Accumulate text for utils extraction
+                all_text += " " + page_text
+
+                # Keep homepage soup for portal/review detection in extract_all_common_fields
+                if page_name == "home":
+                    main_soup = soup
                 
                 # Apply normal functions
                 self._apply_functions(agency, functions, soup, page_text, all_sectors, url)
@@ -112,6 +140,18 @@ class YoungCapitalScraper(BaseAgencyScraper):
         # Finalize
         if all_sectors:
             agency.sectors_core = sorted(list(all_sectors))
+
+        # ==================== APPLY ALL COMMON UTILS EXTRACTIONS ====================
+        self.logger.info("=" * 80)
+        self.logger.info("🔧 APPLYING AUTOMATIC UTILS EXTRACTIONS")
+        self.logger.info("-" * 80)
+        
+        # This automatically extracts 40+ fields using accumulated text from all pages
+        self.extract_all_common_fields(agency, all_text, main_soup)
+
+        self.logger.info("✅ Automatic utils extractions completed")
+        self.logger.info("=" * 80)
+
         
         agency.evidence_urls = list(self.evidence_urls)
         agency.collected_at = self.collected_at
@@ -120,6 +160,9 @@ class YoungCapitalScraper(BaseAgencyScraper):
         self.logger.info(f"✅ Completed scrape of {self.AGENCY_NAME}")
         self.logger.info(f"📄 Evidence URLs: {len(agency.evidence_urls)}")
         self.logger.info("=" * 80)
+
+        with open('all_text.txt', 'w') as f:
+            f.write(all_text)
         
         return agency
     
@@ -171,6 +214,18 @@ class YoungCapitalScraper(BaseAgencyScraper):
             
             elif func_name == "office_locations":
                 self._extract_office_locations(soup, agency, url)
+            
+            elif func_name == "services_detailed":
+                self._extract_services_detailed(soup, agency, url)
+            
+            elif func_name == "statistics":
+                self._extract_statistics(soup, agency, url)
+            
+            elif func_name == "growth_signals":
+                self._extract_growth_signals_from_about(soup, page_text, agency, url)
+            
+            elif func_name == "terms_conditions":
+                self._extract_terms_conditions(soup, agency, url)
     
     def _extract_json_ld(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
         """Extract comprehensive data from JSON-LD schema."""
@@ -254,30 +309,7 @@ class YoungCapitalScraper(BaseAgencyScraper):
                                     agency.hq_province = self.utils.map_city_to_province(city)
                                     street = address.get("streetAddress", "")
                                     postal = address.get("postalCode", "")
-                                    self.logger.info(f"✓ HQ: {city}, {agency.hq_province} ({street}, {postal}) | Source: {url}")
-                        
-                        # Extract social media links
-                        if "sameAs" in data:
-                            social_links = data["sameAs"]
-                            if social_links:
-                                self.logger.info(f"✓ Found {len(social_links)} social media links | Source: {url}")
-                                # Add social media presence to growth signals
-                                for link in social_links:
-                                    if "linkedin.com" in link:
-                                        agency.growth_signals.append("linkedin_presence")
-                                    elif "facebook.com" in link:
-                                        agency.growth_signals.append("facebook_presence")
-                                    elif "twitter.com" in link or "x.com" in link:
-                                        agency.growth_signals.append("twitter_presence")
-                                    elif "youtube.com" in link:
-                                        agency.growth_signals.append("youtube_presence")
-                                    elif "instagram.com" in link:
-                                        agency.growth_signals.append("instagram_presence")
-                                    elif "tiktok.com" in link:
-                                        agency.growth_signals.append("tiktok_presence")
-                                
-                                # Deduplicate growth signals
-                                agency.growth_signals = list(set(agency.growth_signals))
+                                    self.logger.info(f"✓ HQ: {city}, {agency.hq_province} ({street}, {postal}) | Source: {url}") 
                         
                         return
                         
@@ -387,13 +419,6 @@ class YoungCapitalScraper(BaseAgencyScraper):
                         agency.certifications.append("PSO")
                         self.logger.info(f"✓ Certification: PSO (Social Entrepreneurship) | Source: {url}")
         
-        # Add growth signal for comprehensive certifications
-        if len(agency.certifications) >= 5:
-            signal = f"{len(agency.certifications)} certifications"
-            if signal not in agency.growth_signals:
-                agency.growth_signals.append(signal)
-                self.logger.info(f"✓ Growth signal: {signal} | Source: {url}")
-        
         self.logger.info(f"✓ Total certifications: {len(agency.certifications)} | Total memberships: {len(agency.membership)}")
     
     def _extract_sectors(self, soup: BeautifulSoup, all_sectors: Set[str], url: str) -> None:
@@ -459,37 +484,64 @@ class YoungCapitalScraper(BaseAgencyScraper):
     
     def _extract_office_locations(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
         """
-        Extract office locations from embedded JSON data.
-        The page loads offices dynamically via JavaScript variable 'uitzendbureauJSON'.
+        Extract office locations from uitzendbureauJSON JavaScript variable on the main page,
+        then fetch individual office pages to add URLs to evidence_urls.
         """
         import re
         import json
+
         
-        self.logger.info(f"🔍 Extracting office locations from embedded JSON on {url}")
+        self.logger.info(f"🔍 Extracting office locations from uitzendbureauJSON on {url}")
         
         if not agency.office_locations:
             agency.office_locations = []
         
-        # Find the script tag containing uitzendbureauJSON
+        # Find all script tags (don't filter by type, as it might not be set)
         scripts = soup.find_all("script")
+        self.logger.info(f"✓ Found {len(scripts)} scripts | Source: {url}")
         
         offices_data = None
         
         for script in scripts:
-            # script.string is often None for inline JS; get_text() is safer
-            script_text = script.get_text() if script else ""
+            # Try both string and get_text() methods
+            script_text = script.string if script.string else (script.get_text() if script else "")
             
-            if "var uitzendbureauJSON" not in script_text:
+            if not script_text or "var uitzendbureauJSON" not in script_text:
                 continue
             
             # Try to capture the object assigned to uitzendbureauJSON
-            match = re.search(r"var\\s+uitzendbureauJSON\\s*=\\s*(\\{.*?\\});", script_text, re.DOTALL)
+            # Pattern: var uitzendbureauJSON = { ... };
+            # Use a more robust pattern that matches balanced braces
+            match = re.search(r"var\s+uitzendbureauJSON\s*=\s*(\{)", script_text, re.DOTALL)
             if not match:
                 continue
             
             self.logger.info(f"✓ Found uitzendbureauJSON script | Source: {url}")
             
-            json_str = match.group(1).rstrip(";").strip()
+            # Find the start position of the JSON object
+            start_pos = match.end(1) - 1  # Position of the opening brace
+            
+            # Find the matching closing brace by counting braces
+            brace_count = 0
+            json_end = start_pos
+            for i in range(start_pos, len(script_text)):
+                if script_text[i] == '{':
+                    brace_count += 1
+                elif script_text[i] == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        json_end = i + 1
+                        break
+            
+            if brace_count != 0:
+                self.logger.warning(f"⚠ Could not find matching closing brace for uitzendbureauJSON")
+                continue
+            
+            json_str = script_text[start_pos:json_end].strip()
+            
+            # Remove trailing semicolon if present
+            json_str = json_str.rstrip(";").strip()
+            
             try:
                 parsed = json.loads(json_str)
             except (json.JSONDecodeError, ValueError) as e:
@@ -500,8 +552,6 @@ class YoungCapitalScraper(BaseAgencyScraper):
                 offices_data = parsed
                 self.logger.info(f"✓ Successfully parsed JSON data with {len(parsed['offices'])} offices | Source: {url}")
                 break
-            else:
-                self.logger.info("  Parsed uitzendbureauJSON but no offices found; continuing search.")
         
         if not offices_data or "offices" not in offices_data:
             self.logger.warning(f"Could not find office data in uitzendbureauJSON on {url}")
@@ -510,20 +560,27 @@ class YoungCapitalScraper(BaseAgencyScraper):
         offices_list = offices_data["offices"]
         self.logger.info(f"✓ Found {len(offices_list)} offices in JSON data | Source: {url}")
         
-        # Extract each office
+        # Extract office locations from JSON data
+        office_urls = set()
         for office_data in offices_list:
             try:
-                # Get city name
-                city_name = office_data.get("name", "")
+                # Get city name from address.city (preferred) or name field
+                address = office_data.get("address", {})
+                city_name = address.get("city") if isinstance(address, dict) else None
+                
+                # Fallback to name field if address.city is not available
+                if not city_name:
+                    city_name = office_data.get("name", "")
                 
                 if not city_name:
-                    # Try from address
-                    address = office_data.get("address", {})
-                    city_name = address.get("city", "")
-                
-                if not city_name:
-                    self.logger.warning(f"  Skipped office with no city name: {office_data}")
+                    self.logger.warning(f"  Skipped office with no city name: {office_data.get('name', 'Unknown')}")
                     continue
+                
+                # Get office URL for evidence tracking
+                office_url_path = office_data.get("url", "")
+                if office_url_path:
+                    office_url = f"{self.WEBSITE_URL}{office_url_path}"
+                    office_urls.add(office_url)
                 
                 # Determine province using utils
                 province = self.utils.map_city_to_province(city_name)
@@ -542,10 +599,496 @@ class YoungCapitalScraper(BaseAgencyScraper):
                     self.logger.info(f"  Skipped duplicate: {city_name}")
                 
             except Exception as e:
-                self.logger.error(f"Error processing office data {office_data}: {e}")
+                self.logger.error(f"Error processing office data {office_data.get('name', 'Unknown')}: {e}")
                 continue
         
+        # Fetch individual office pages to add URLs to evidence_urls
+        if office_urls:
+            self.logger.info(f"📄 Fetching {len(office_urls)} individual office pages for evidence tracking...")
+            for office_url in office_urls:
+                try:
+                    self.logger.info(f"  Fetching: {office_url}")
+                    office_soup = self.fetch_page(office_url)
+                    # Add URL to evidence_urls
+                    self.evidence_urls.append(office_url)
+                except Exception as e:
+                    self.logger.warning(f"  ⚠ Failed to fetch {office_url}: {e}")
+
+        
         self.logger.info(f"✓ Total offices extracted: {len(agency.office_locations)} | Source: {url}")
+    
+    def _extract_services_detailed(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
+        """
+        Extract services from the diensten page card elements.
+        Maps Dutch service names to AgencyServices fields.
+        """
+        self.logger.info(f"🔍 Extracting detailed services from {url}")
+        
+        # Initialize services if not already set
+        if not agency.services:
+            agency.services = AgencyServices()
+        
+        # Find all service cards - they have class "card card--horizontal"
+        service_cards = soup.find_all("div", class_=lambda x: x and "card" in x and "card--horizontal" in x)
+        
+        if not service_cards:
+            self.logger.warning(f"Could not find service cards on {url}")
+            return
+        
+        self.logger.info(f"✓ Found {len(service_cards)} service cards | Source: {url}")
+        
+        # Service name mapping (Dutch -> AgencyServices field)
+        service_mapping = {
+            "werving": "werving_selectie",
+            "selectie": "werving_selectie",
+            "werving & selectie": "werving_selectie",
+            "werving en selectie": "werving_selectie",
+            "uitzendkrachten": "uitzenden",
+            "uitzenden": "uitzenden",
+            "detachering": "detacheren",
+            "detacheren": "detacheren",
+            "vakprofessionals": "detacheren",
+            "freelance": "zzp_bemiddeling",
+            "freelancers": "zzp_bemiddeling",
+            "freelancer": "zzp_bemiddeling",
+            "zzp": "zzp_bemiddeling",
+            "vacature plaatsen": "vacaturebemiddeling_only",
+            "vacaturebemiddeling": "vacaturebemiddeling_only",
+            "trainingen": "opleiden_ontwikkelen",
+            "training": "opleiden_ontwikkelen",
+            "opleiden": "opleiden_ontwikkelen",
+            "ontwikkelen": "opleiden_ontwikkelen",
+        }
+        
+        for card in service_cards:
+            try:
+                # Extract service name from h2 tag
+                h2 = card.find("h2")
+                if not h2:
+                    continue
+                
+                service_name = h2.get_text(strip=True).lower()
+                
+                # Extract description text for additional context
+                description_p = card.find("p")
+                description_text = description_p.get_text(strip=True).lower() if description_p else ""
+                
+                # Map service to AgencyServices field
+                # Prioritize exact matches in service name, then check description
+                matched_service = None
+                
+                # First, try to match against service name (more reliable)
+                for key, field_name in service_mapping.items():
+                    if key in service_name:
+                        matched_service = field_name
+                        self.logger.info(f"  Matched '{key}' in service name '{service_name}' → {field_name}")
+                        break
+                
+                # If no match in service name, check description
+                if not matched_service:
+                    for key, field_name in service_mapping.items():
+                        if key in description_text:
+                            matched_service = field_name
+                            self.logger.info(f"  Matched '{key}' in description → {field_name}")
+                            break
+                
+                if matched_service:
+                    # Set the service field to True
+                    if hasattr(agency.services, matched_service):
+                        setattr(agency.services, matched_service, True)
+                        self.logger.info(f"✓ Service: {matched_service} (from '{service_name}') | Source: {url}")
+                    else:
+                        self.logger.warning(f"  Unknown service field: {matched_service} | Source: {url}")
+                else:
+                    self.logger.info(f"  No mapping found for service: '{service_name}' | Source: {url}")
+                
+            except Exception as e:
+                self.logger.error(f"Error processing service card: {e}")
+                continue
+        
+        self.logger.info(f"✓ Services extraction completed | Source: {url}")
+    
+    def _extract_statistics(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
+        """
+        Extract statistics from the about-us page counter section.
+        Extracts candidate pool size, annual placements, etc.
+        """
+        import re
+        
+        self.logger.info(f"🔍 Extracting statistics from {url}")
+        
+        # Find the statistics section with class "about-us-counter"
+        stats_section = soup.find("section", class_="about-us-counter")
+        if not stats_section:
+            self.logger.warning(f"Could not find statistics section on {url}")
+            return
+        
+        # Find all stat elements with class "stat-count"
+        stat_elements = stats_section.find_all("span", class_="stat-count")
+        
+        for stat_elem in stat_elements:
+            try:
+                # Get the data-count attribute or text content
+                data_count = stat_elem.get("data-count", "")
+                stat_text = stat_elem.get_text(strip=True)
+                
+                # Get the label from the next sibling <p> tag
+                label_p = stat_elem.find_next("p", class_="text--bold")
+                label = label_p.get_text(strip=True).lower() if label_p else ""
+                
+                # Get the unit (M, K) from next sibling span if exists
+                # The unit is in a sibling span with class "about-us__stats" but not "stat-count"
+                unit_span = stat_elem.find_next_sibling("span", class_="about-us__stats")
+                if not unit_span:
+                    # Try finding in parent's next siblings
+                    parent = stat_elem.parent
+                    if parent:
+                        next_spans = parent.find_all("span", class_="about-us__stats")
+                        for span in next_spans:
+                            if "stat-count" not in span.get("class", []):
+                                unit_span = span
+                                break
+                unit = unit_span.get_text(strip=True) if unit_span else ""
+                
+                # Determine the value
+                if data_count:
+                    value = float(data_count)
+                else:
+                    # Try to parse from text
+                    value_match = re.search(r'(\d+(?:[.,]\d+)?)', stat_text)
+                    if value_match:
+                        value = float(value_match.group(1).replace(',', '.'))
+                    else:
+                        continue
+                
+                # Apply unit multiplier
+                if unit == "M":
+                    value = int(value * 1_000_000)
+                elif unit == "K":
+                    value = int(value * 1_000)
+                else:
+                    value = int(value)
+                
+                # Map to agency fields based on label
+                if "kandidaten in database" in label or "candidates in database" in label:
+                    if not agency.candidate_pool_size_estimate or agency.candidate_pool_size_estimate < value:
+                        agency.candidate_pool_size_estimate = value
+                        self.logger.info(f"✓ Candidate pool size: {value:,} | Source: {url}")
+                
+                elif "kandidaten per dag" in label or "candidates per day" in label:
+                    # Calculate annual placements: daily * 365
+                    annual_placements = value * 365
+                    if not agency.annual_placements_estimate or agency.annual_placements_estimate < annual_placements:
+                        agency.annual_placements_estimate = annual_placements
+                        self.logger.info(f"✓ Annual placements estimate: {annual_placements:,} (from {value:,} per day) | Source: {url}")
+                
+                elif "kandidaten per week" in label or "candidates per week" in label:
+                    # Calculate annual placements: weekly * 52
+                    annual_placements = value * 52
+                    if not agency.annual_placements_estimate or agency.annual_placements_estimate < annual_placements:
+                        agency.annual_placements_estimate = annual_placements
+                        self.logger.info(f"✓ Annual placements estimate: {annual_placements:,} (from {value:,} per week) | Source: {url}")
+                
+                elif "vestigingen" in label or "offices" in label or "locations" in label:
+                    # This is just a count, not a field we track separately
+                    # (we already extract actual office locations)
+                    self.logger.info(f"  Found office count: {value} | Source: {url}")
+                
+            except (ValueError, AttributeError) as e:
+                self.logger.warning(f"  Error parsing statistic: {e}")
+                continue
+        
+        # Also check for mentions in text (e.g., "meer dan 20.000 kandidaten per week")
+        page_text = soup.get_text(separator=" ", strip=True)
+        
+        # Pattern: "meer dan 20.000 kandidaten per week"
+        weekly_match = re.search(r'(\d+(?:[.,]\d+)?)\s*(?:k|duizend|thousand)?\s*kandidaten\s*per\s*week', page_text.lower())
+        if weekly_match:
+            weekly_value = float(weekly_match.group(1).replace(',', '.'))
+            if 'k' in weekly_match.group(0) or 'duizend' in weekly_match.group(0):
+                weekly_value = weekly_value * 1_000
+            annual_placements = int(weekly_value * 52)
+            if not agency.annual_placements_estimate or agency.annual_placements_estimate < annual_placements:
+                agency.annual_placements_estimate = annual_placements
+                self.logger.info(f"✓ Annual placements estimate: {annual_placements:,} (from text: {weekly_value:,.0f} per week) | Source: {url}")
+        
+        self.logger.info(f"✓ Statistics extraction completed | Source: {url}")
+    
+    def _extract_growth_signals_from_about(self, soup: BeautifulSoup, page_text: str, agency: Agency, url: str) -> None:
+        """
+        Extract growth signals from the about-us page.
+        """
+        self.logger.info(f"🔍 Extracting growth signals from {url}")
+        
+        text_lower = page_text.lower()
+        
+        # Check for specific growth signals mentioned on this page
+        growth_signals_to_check = [
+            ("grootste jongerendatabase van europa", "Grootste jongerendatabase van Europa"),
+            ("grootste database", "Grootste jongerendatabase"),
+            ("meer dan 20.000 kandidaten per week", "20.000+ kandidaten per week"),
+            ("online beter vindbaar", "Online beter vindbaar dan andere uitzendbureaus"),
+            ("meer dan twintig jaar", "Actief sinds 2000 (meer dan 20 jaar)"),
+        ]
+        
+        for keyword, signal_text in growth_signals_to_check:
+            if keyword in text_lower:
+                if signal_text not in agency.growth_signals:
+                    agency.growth_signals.append(signal_text)
+                    self.logger.info(f"✓ Growth signal: {signal_text} | Source: {url}")
+        
+        # Check for founding year mention (2000)
+        if "2000" in page_text and any(keyword in text_lower for keyword in ["opgericht", "begonnen", "founded", "gestart"]):
+            signal = "Opgericht in 2000"
+            if signal not in agency.growth_signals:
+                agency.growth_signals.append(signal)
+                self.logger.info(f"✓ Growth signal: {signal} | Source: {url}")
+        
+        self.logger.info(f"✓ Growth signals extraction completed | Source: {url}")
+    
+    def _extract_terms_conditions(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
+        """
+        Extract data from terms & conditions PDF.
+        Downloads the Dutch PDF, extracts text, and parses phase system and other data.
+        """
+        self.logger.info(f"🔍 Extracting terms & conditions from {url}")
+        
+        # Find the Dutch PDF link
+        # Look for link with text "Algemene Voorwaarden (NL)" or similar
+        pdf_links = soup.find_all("a", href=True)
+        dutch_pdf_url = None
+        
+        for link in pdf_links:
+            href = link.get("href", "")
+            link_text = link.get_text(strip=True).lower()
+            
+            # Look for Dutch terms & conditions link
+            # Check for "algemene voorwaarden" and "nl" or just "algemene voorwaarden" with PDF extension
+            if href.endswith(".pdf"):
+                if ("algemene voorwaarden" in link_text and "nl" in link_text) or \
+                   ("algemene voorwaarden" in link_text and "general" not in link_text):
+                    dutch_pdf_url = href
+                    # Convert relative URL to absolute if needed
+                    if dutch_pdf_url.startswith("/"):
+                        dutch_pdf_url = f"{self.WEBSITE_URL}{dutch_pdf_url}"
+                    elif not dutch_pdf_url.startswith("http"):
+                        dutch_pdf_url = f"{self.WEBSITE_URL}/{dutch_pdf_url}"
+                    break
+        
+        # Fallback: if no specific Dutch link found, try any PDF with "algemene voorwaarden" in URL
+        if not dutch_pdf_url:
+            for link in pdf_links:
+                href = link.get("href", "")
+                if href.endswith(".pdf") and "algemene-voorwaarden" in href.lower():
+                    dutch_pdf_url = href
+                    if dutch_pdf_url.startswith("/"):
+                        dutch_pdf_url = f"{self.WEBSITE_URL}{dutch_pdf_url}"
+                    elif not dutch_pdf_url.startswith("http"):
+                        dutch_pdf_url = f"{self.WEBSITE_URL}/{dutch_pdf_url}"
+                    break
+        
+        if not dutch_pdf_url:
+            self.logger.warning(f"Could not find Dutch PDF URL on {url}")
+            return
+        
+        self.logger.info(f"✓ Found Dutch PDF: {dutch_pdf_url}")
+        
+        try:
+            # Download PDF
+            response = requests.get(dutch_pdf_url, timeout=30)
+            response.raise_for_status()
+            
+            # Extract text from PDF using pdfplumber
+            pdf_text = ""
+            with pdfplumber.open(io.BytesIO(response.content)) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        pdf_text += page_text + "\n"
+            
+            if not pdf_text:
+                self.logger.warning(f"Could not extract text from PDF: {dutch_pdf_url}")
+                return
+            
+            self.logger.info(f"✓ Extracted {len(pdf_text)} characters from PDF | Source: {dutch_pdf_url}")
+            
+            # Add PDF URL to evidence_urls
+            self.evidence_urls.append(dutch_pdf_url)
+            
+            # Extract phase system
+            self._extract_phase_system_from_pdf(pdf_text, agency, dutch_pdf_url)
+            
+            # Extract other relevant data (takeover policy, pricing, etc.)
+            self._extract_other_terms_data(pdf_text, agency, dutch_pdf_url)
+            
+        except Exception as e:
+            self.logger.error(f"Error downloading/parsing PDF {dutch_pdf_url}: {e}")
+    
+    def _extract_phase_system_from_pdf(self, pdf_text: str, agency: Agency, url: str) -> None:
+        """
+        Extract phase system information from PDF text.
+        """
+        import re
+        
+        self.logger.info(f"🔍 Extracting phase system from PDF | Source: {url}")
+        
+        pdf_text_lower = pdf_text.lower()
+        
+        # Check if ABU CAO is mentioned
+        is_abu = "abu cao" in pdf_text_lower or "abu-cao" in pdf_text_lower
+        
+        # Initialize phase system if not exists
+        if not agency.phase_system:
+            from staffing_agency_scraper.models.agency import PhaseSystem
+            agency.phase_system = PhaseSystem()
+        
+        # Extract phase definitions
+        # Pattern: "UITZENDFASE A", "UITZENDFASE B", "UITZENDFASE C"
+        phases_found = []
+        
+        # Look for phase definitions - prioritize "UITZENDFASE" pattern
+        phase_patterns = [
+            r'uitzendfase\s+([A-D])',  # "UITZENDFASE A", "UITZENDFASE B"
+            r'fase\s+([A-D])\s+(?:is|betekent|duurt|werkzaam)',  # "Fase A is werkzaam"
+            r'fase\s+([A-D])',  # Generic "fase A"
+            r'phase\s+([A-D])',  # "phase A"
+        ]
+        
+        for pattern in phase_patterns:
+            matches = re.findall(pattern, pdf_text, re.IGNORECASE)
+            for match in matches:
+                phase_letter = match.upper()
+                if phase_letter in ['A', 'B', 'C', 'D'] and phase_letter not in phases_found:
+                    phases_found.append(phase_letter)
+        
+        if phases_found:
+            phases_list = sorted(phases_found)  # Sort: A, B, C, D
+            
+            # Determine if ABU or NBBU (default to ABU if mentioned)
+            if is_abu:
+                agency.phase_system.abu_phases = phases_list
+                self.logger.info(f"✓ Found ABU phases in PDF: {phases_list} | Source: {url}")
+            else:
+                # Check for NBBU mention
+                if "nbbu" in pdf_text_lower:
+                    agency.phase_system.nbbu_phases = phases_list
+                    self.logger.info(f"✓ Found NBBU phases in PDF: {phases_list} | Source: {url}")
+                else:
+                    # Default to ABU if no clear indication
+                    agency.phase_system.abu_phases = phases_list
+                    self.logger.info(f"✓ Found phases in PDF: {phases_list} (defaulting to ABU) | Source: {url}")
+        
+        # Also check for phase descriptions to extract more details
+        # Look for "Fase A", "Fase B", "Fase C" with descriptions
+        phase_descriptions = {}
+        for phase in ['A', 'B', 'C', 'D']:
+            # Pattern to find phase description
+            pattern = rf'fase\s+{phase}[^\w]*(?:is|betekent|duurt|werkzaam)[^.]*\.'
+            match = re.search(pattern, pdf_text, re.IGNORECASE | re.DOTALL)
+            if match:
+                phase_descriptions[phase] = match.group(0)
+        
+        if phase_descriptions:
+            self.logger.info(f"✓ Found phase descriptions for: {list(phase_descriptions.keys())} | Source: {url}")
+    
+    def _extract_other_terms_data(self, pdf_text: str, agency: Agency, url: str) -> None:
+        """
+        Extract other relevant data from terms & conditions PDF.
+        Includes: takeover policy, pricing info, minimum assignment duration, etc.
+        """
+        import re
+        
+        self.logger.info(f"🔍 Extracting other terms data from PDF | Source: {url}")
+        
+        pdf_text_lower = pdf_text.lower()
+        
+        # Extract takeover policy (overname)
+        # Look for takeover fee information
+        takeover_section = re.search(
+            r'(?:overname|takeover|arbeidsverhouding.*flexkracht)[^.]{0,500}',
+            pdf_text_lower,
+            re.IGNORECASE | re.DOTALL
+        )
+        
+        if takeover_section:
+            takeover_text = takeover_section.group(0)
+            
+            # Check for free takeover period
+            # Pattern: "na X uren gratis overnemen", "na X weken overname zonder kosten"
+            hours_match = re.search(r'na\s+(\d+)\s+uren?\s+(?:gratis|kosteloos|zonder\s+kosten)?\s*(?:overnemen|overname)', takeover_text)
+            if hours_match:
+                if not agency.takeover_policy:
+                    from staffing_agency_scraper.models.agency import TakeoverPolicy
+                    agency.takeover_policy = TakeoverPolicy()
+                agency.takeover_policy.free_takeover_hours = int(hours_match.group(1))
+                self.logger.info(f"✓ Free takeover hours: {agency.takeover_policy.free_takeover_hours} | Source: {url}")
+            
+            weeks_match = re.search(r'na\s+(\d+)\s+weken?\s+(?:gratis|kosteloos|zonder\s+kosten)?\s*(?:overnemen|overname)', takeover_text)
+            if weeks_match:
+                if not agency.takeover_policy:
+                    from staffing_agency_scraper.models.agency import TakeoverPolicy
+                    agency.takeover_policy = TakeoverPolicy()
+                agency.takeover_policy.free_takeover_weeks = int(weeks_match.group(1))
+                self.logger.info(f"✓ Free takeover weeks: {agency.takeover_policy.free_takeover_weeks} | Source: {url}")
+            
+            # Check for takeover fee
+            # Pattern: "30% van het Opdrachtgeverstarief"
+            fee_match = re.search(r'(\d+)%\s*(?:van|of)?\s*(?:het\s+)?(?:laatst\s+)?(?:geldende\s+)?(?:opdrachtgeverstarief|tarief)', takeover_text)
+            if fee_match:
+                if not agency.takeover_policy:
+                    from staffing_agency_scraper.models.agency import TakeoverPolicy
+                    agency.takeover_policy = TakeoverPolicy()
+                from staffing_agency_scraper.models.agency import OvernameFeeModel
+                agency.takeover_policy.overname_fee_model = OvernameFeeModel.PERCENTAGE_SALARY
+                percentage = fee_match.group(1)
+                agency.takeover_policy.overname_fee_hint = f"{percentage}% van Opdrachtgeverstarief"
+                self.logger.info(f"✓ Takeover fee: {agency.takeover_policy.overname_fee_hint} | Source: {url}")
+            
+            # Set contract reference
+            if not agency.takeover_policy.overname_contract_reference:
+                agency.takeover_policy.overname_contract_reference = url
+        
+        # Extract minimum assignment duration
+        # Pattern: "minimaal X weken", "minimum X maanden"
+        min_duration_match = re.search(r'minim(?:aal|um)\s+(\d+)\s+(?:weken?|maanden?)', pdf_text_lower)
+        if min_duration_match:
+            duration = int(min_duration_match.group(1))
+            unit = min_duration_match.group(0).split()[-1]
+            if "maand" in unit:
+                duration_weeks = duration * 4
+            else:
+                duration_weeks = duration
+            
+            if not agency.min_assignment_duration_weeks or agency.min_assignment_duration_weeks > duration_weeks:
+                agency.min_assignment_duration_weeks = duration_weeks
+                self.logger.info(f"✓ Min assignment duration: {duration_weeks} weeks | Source: {url}")
+        
+        # Extract minimum hours per week
+        min_hours_match = re.search(r'minim(?:aal|um)\s+(\d+)\s+uur\s+(?:per\s+week)?', pdf_text_lower)
+        if min_hours_match:
+            hours = int(min_hours_match.group(1))
+            if not agency.min_hours_per_week or agency.min_hours_per_week > hours:
+                agency.min_hours_per_week = hours
+                self.logger.info(f"✓ Min hours per week: {hours} | Source: {url}")
+        
+        # Extract omrekenfactor if mentioned
+        omrekenfactor_match = re.search(r'omrekenfactor\s+(?:van\s+)?(\d+[.,]\d+)', pdf_text_lower)
+        if omrekenfactor_match:
+            factor = float(omrekenfactor_match.group(1).replace(',', '.'))
+            if not agency.omrekenfactor_min or agency.omrekenfactor_min > factor:
+                agency.omrekenfactor_min = factor
+            if not agency.omrekenfactor_max or agency.omrekenfactor_max < factor:
+                agency.omrekenfactor_max = factor
+            self.logger.info(f"✓ Omrekenfactor: {factor} | Source: {url}")
+        
+        # Extract CAO type if mentioned
+        if "abu cao" in pdf_text_lower or "abu-cao" in pdf_text_lower:
+            from staffing_agency_scraper.models.agency import CaoType
+            if agency.cao_type == CaoType.ONBEKEND:
+                agency.cao_type = CaoType.ABU
+                self.logger.info(f"✓ CAO type: ABU (from PDF) | Source: {url}")
+        
+        self.logger.info(f"✓ Other terms data extraction completed | Source: {url}")
 
 
 @dg.asset(group_name="agencies")
