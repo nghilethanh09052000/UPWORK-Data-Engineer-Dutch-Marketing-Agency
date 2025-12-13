@@ -17,18 +17,18 @@ This project scrapes only **factual company data** from official staffing agency
 1. ✅ **Adecco** - Complex scraper with API integration + PDF parsing
 2. ✅ **ASA Talent** - Standard scraper with normalized sectors
 3. ✅ **Brunel** - International agency with JSON extraction
-4. ✅ **Covebo** - Standard scraper with sector extraction
+4. ⚠️ **Covebo** - Minimal data extraction (needs improvement)
 5. ✅ **Hays Nederland** - Multiple page sources, chatbot detection
 6. ✅ **Maandag** - JSON-LD extraction, certification pages
 7. ✅ **Manpower** - 23 office locations, sector categorization
 8. ✅ **Michael Page** - 4 offices, ISO certifications, Google reviews
 9. ✅ **Olympia** - Paginated offices, SMB focus, ABU CAO
-10. ✅ **Randstad** - Global HQ, comprehensive services extraction
+10. ⚠️ **Randstad** - Basic extraction (missing office locations, some fields)
 11. ✅ **Start People** - PDF legal extraction, RGF Staffing group
 12. ✅ **Tempo-Team** - Standard scraper with sector normalization
 13. ✅ **TMI** - Healthcare specialization (Zorg), review rating extraction
 14. ✅ **Yacht** - JSON-LD extraction, 7 offices, Seamly chatbot detection, 9 sectors
-15. ✅ **YoungCapital** - JSON-LD extraction, 6 social platforms, founded 2000
+15. ✅ **YoungCapital** - JSON-LD extraction, 6 social platforms, founded 2000, PDF phase system extraction
 
 **Key Features Across All Scrapers**: JSON-LD extraction, logo filtering, sector normalization, portal detection, role levels, review sources, certifications, office locations, Dutch keyword optimization
 
@@ -786,8 +786,11 @@ Proprietary - inhuren.nl
 
 ## Project Status
 
-**Last Updated**: December 12, 2025  
+**Last Updated**: December 13, 2025  
 **MVP Progress**: ✅ **15/15 agencies completed (100%)** 🎉  
+**Data Extraction Status**: 
+- ✅ **13/15 agencies** with ~50%+ data extraction (YoungCapital, Tempo-Team, Olympia, Manpower, Start People, TMI, Yacht, Hays, Brunel, ASA Talent, Maandag, Michael Page, Adecco)
+- ⚠️ **2/15 agencies** need improvement (Randstad - missing office locations, Covebo - minimal data)
 **Field Coverage**: 67/81 fields implemented (83%)  
 **Utility Functions**: 69 reusable extraction methods in `utils.py`
 
@@ -803,9 +806,14 @@ Proprietary - inhuren.nl
 - ✅ API integration support (JSON endpoints, Next.js data, Seamly chatbot)
 - ✅ Enhanced logging with source URL tracking
 
-**Latest Additions** (December 12, 2025):
+**Latest Additions** (December 13, 2025):
+- ✅ **YoungCapital** - Enhanced with PDF terms & conditions extraction, phase system (A/B/C), takeover policy, statistics (10.2M candidates, 8M annual placements), growth signals
+- ✅ **PDF Extraction** - Added pdfplumber integration for legal document parsing (terms & conditions, phase systems, takeover policies)
+- ✅ **Phase System Detection** - ABU/NBBU phase extraction from PDF documents
+- ✅ **Statistics Extraction** - Candidate pool size, annual placements from about pages
+
+**Previous Additions** (December 12, 2025):
 - ✅ **Yacht** - Randstad Professional, 7 offices, JSON-LD extraction, Seamly chatbot, 9 sectors
-- ✅ **YoungCapital** - Youth-focused, JSON-LD extraction, 6 social platforms, founded 2000
 - ✅ **TMI** - Healthcare vertical simplified to "Zorg", review ratings
 - ✅ **Dutch Service Keywords** - 75+ optimized terms (detacheren, werving, zzp, etc.)
 
