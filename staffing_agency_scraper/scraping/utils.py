@@ -103,7 +103,6 @@ ROLE_LEVEL_KEYWORDS = {
     "starter": [
         "starter",
         "junior",
-        "beginning",
         "entree",
         "startende",
     ],
@@ -1646,23 +1645,123 @@ class AgencyScraperUtils:
         """
         self.logger.info(f"🔍 Fetching omrekenfactor from {url}")
         
+        text_lower = text.lower()
+        
         # Pattern: omrekenfactor 1.45, omrekenfactor vanaf 1.4, 1.35-1.55, etc.
         patterns = [
-            r'omrekenfactor\s+(?:van\s+)?(\d+[.,]\d+)(?:\s*(?:-|tot)\s*(\d+[.,]\d+))?',
-            r'multiplicator\s+(?:van\s+)?(\d+[.,]\d+)(?:\s*(?:-|tot)\s*(\d+[.,]\d+))?',
-            r'markup\s+(?:van\s+)?(\d+[.,]\d+)(?:\s*(?:-|tot)\s*(\d+[.,]\d+))?',
+            # Range patterns: "omrekenfactor 1.35 - 1.55", "omrekenfactor 1,35 tot 1,55"
+            r'omrekenfactor\s+(?:van\s+)?(\d+[.,]\d+)\s*(?:-|tot|t/m|en)\s*(\d+[.,]\d+)',
+            r'omrekenfactor\s+(\d+[.,]\d+)\s*(?:-|tot|t/m|en)\s*(\d+[.,]\d+)',
+            # Single value with "vanaf": "omrekenfactor vanaf 1.4"
+            r'omrekenfactor\s+vanaf\s+(\d+[.,]\d+)',
+            # Single value: "omrekenfactor 1.45"
+            r'omrekenfactor\s+(\d+[.,]\d+)',
+            # Alternative terms
+            r'multiplicator\s+(?:van\s+)?(\d+[.,]\d+)(?:\s*(?:-|tot|t/m|en)\s*(\d+[.,]\d+))?',
+            r'markup\s+(?:van\s+)?(\d+[.,]\d+)(?:\s*(?:-|tot|t/m|en)\s*(\d+[.,]\d+))?',
+            r'mark-up\s+(?:van\s+)?(\d+[.,]\d+)(?:\s*(?:-|tot|t/m|en)\s*(\d+[.,]\d+))?',
+            # Pattern with "tussen": "tussen 1.35 en 1.55"
+            r'(?:omrekenfactor|multiplicator|markup)\s+tussen\s+(\d+[.,]\d+)\s+en\s+(\d+[.,]\d+)',
+            # Pattern: "1.35x tot 1.55x" or "1,35x - 1,55x"
+            r'(\d+[.,]\d+)x\s*(?:-|tot|t/m|en)\s*(\d+[.,]\d+)x',
         ]
         
         for pattern in patterns:
-            match = re.search(pattern, text.lower())
+            match = re.search(pattern, text_lower)
             if match:
-                min_val = float(match.group(1).replace(',', '.'))
-                max_val = float(match.group(2).replace(',', '.')) if match.group(2) else None
-                
-                self.logger.info(f"✓ Found omrekenfactor: {min_val} - {max_val} | Source: {url}")
-                return (min_val, max_val)
+                try:
+                    min_val = float(match.group(1).replace(',', '.'))
+                    max_val = None
+                    if len(match.groups()) >= 2 and match.group(2):
+                        max_val = float(match.group(2).replace(',', '.'))
+                    # If only one value found and it's a range pattern, use it as both min and max
+                    elif len(match.groups()) == 1:
+                        max_val = min_val
+                    
+                    self.logger.info(f"✓ Found omrekenfactor: {min_val} - {max_val} | Source: {url}")
+                    return (min_val, max_val)
+                except (ValueError, AttributeError):
+                    continue
         
         return (None, None)
+    
+    def fetch_example_pricing_hint(self, text: str, url: str) -> Optional[str]:
+        """
+        Extract example pricing hint from text.
+        
+        Looks for concrete pricing examples like:
+        - "€25 per uur", "€18,50 per uur"
+        - "Vanaf €20 per uur"
+        - "€25-35 per uur"
+        - "€2.500 per maand"
+        - "€15.000 per jaar"
+        
+        Returns:
+        - Example pricing hint as string
+        - None if not found
+        """
+        self.logger.info(f"🔍 Fetching example pricing hint from {url}")
+        
+        text_lower = text.lower()
+        
+        # Patterns for hourly rates
+        hourly_patterns = [
+            # Range: "€25-35 per uur", "€25 tot €35 per uur"
+            r'€\s*(\d+(?:[.,]\d+)?)\s*(?:-|tot|t/m)\s*€?\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?uur',
+            # From: "vanaf €20 per uur", "starting from €20 per hour"
+            r'vanaf\s+€\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?uur',
+            # Single: "€25 per uur", "€18,50 per uur"
+            r'€\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?uur',
+        ]
+        
+        for pattern in hourly_patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                if len(match.groups()) == 2:
+                    # Range found
+                    min_val = match.group(1).replace(',', '.')
+                    max_val = match.group(2).replace(',', '.')
+                    hint = f"€{min_val}-{max_val} per uur"
+                else:
+                    # Single value
+                    val = match.group(1).replace(',', '.')
+                    if 'vanaf' in text_lower[text_lower.find(match.group(0))-20:text_lower.find(match.group(0))]:
+                        hint = f"Vanaf €{val} per uur"
+                    else:
+                        hint = f"€{val} per uur"
+                
+                self.logger.info(f"✓ Found example pricing hint: {hint} | Source: {url}")
+                return hint
+        
+        # Patterns for monthly rates
+        monthly_patterns = [
+            r'€\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?maand',
+            r'€\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?month',
+        ]
+        
+        for pattern in monthly_patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                val = match.group(1).replace(',', '.')
+                hint = f"€{val} per maand"
+                self.logger.info(f"✓ Found example pricing hint: {hint} | Source: {url}")
+                return hint
+        
+        # Patterns for annual rates
+        annual_patterns = [
+            r'€\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?jaar',
+            r'€\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?year',
+        ]
+        
+        for pattern in annual_patterns:
+            match = re.search(pattern, text_lower)
+            if match:
+                val = match.group(1).replace(',', '.')
+                hint = f"€{val} per jaar"
+                self.logger.info(f"✓ Found example pricing hint: {hint} | Source: {url}")
+                return hint
+        
+        return None
     
     def fetch_avg_time_to_fill(self, text: str, url: str) -> Optional[int]:
         """

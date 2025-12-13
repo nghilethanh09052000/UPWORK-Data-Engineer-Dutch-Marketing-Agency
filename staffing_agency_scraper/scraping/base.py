@@ -364,6 +364,11 @@ class BaseAgencyScraper(ABC):
             if omrekenfactor_max:
                 agency.omrekenfactor_max = omrekenfactor_max
         
+        if not agency.example_pricing_hint:
+            example_pricing = self.utils.fetch_example_pricing_hint(all_text, url)
+            if example_pricing:
+                agency.example_pricing_hint = example_pricing
+        
         if not agency.avg_hourly_rate_low and not agency.avg_hourly_rate_high:
             rate_low, rate_high = self.utils.fetch_avg_hourly_rate(all_text, url)
             if rate_low:

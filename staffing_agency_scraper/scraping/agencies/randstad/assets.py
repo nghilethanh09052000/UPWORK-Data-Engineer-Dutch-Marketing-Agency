@@ -159,6 +159,9 @@ class RandstadScraper(BaseAgencyScraper):
         self.logger.info(f"✅ Completed scrape of {self.AGENCY_NAME}")
         self.logger.info(f"📄 Evidence URLs: {len(agency.evidence_urls)}")
         self.logger.info("=" * 80)
+
+        with open('all_text.txt', 'w') as f:
+            f.write(all_text)
         
         return agency
     
