@@ -72,10 +72,22 @@ class ASATalentScraper(BaseAgencyScraper):
                 if url == self.WEBSITE_URL and not agency.logo_url:
                     logo = self.utils.fetch_logo(soup, url)
                     if logo:
+                        # Convert relative URL to absolute
+                        if logo.startswith("/"):
+                            logo = f"{self.WEBSITE_URL}{logo}"
+                        elif not logo.startswith("http"):
+                            logo = f"{self.WEBSITE_URL}/{logo}"
                         agency.logo_url = logo
                     else:
                         # Fallback to custom method
-                        agency.logo_url = self._extract_logo(soup)
+                        logo = self._extract_logo(soup)
+                        if logo:
+                            # Convert relative URL to absolute
+                            if logo.startswith("/"):
+                                logo = f"{self.WEBSITE_URL}{logo}"
+                            elif not logo.startswith("http"):
+                                logo = f"{self.WEBSITE_URL}/{logo}"
+                            agency.logo_url = logo
 
                 # Extract office locations from vestigingen page
                 if url == "https://asatalent.nl/vestigingen":
@@ -230,8 +242,11 @@ class ASATalentScraper(BaseAgencyScraper):
         if logo:
             src = logo.get("src") or logo.get("data-src")
             if src and not src.startswith("data:"):
-                if not src.startswith("http"):
+                # Convert relative URL to absolute
+                if src.startswith("/"):
                     src = f"{self.WEBSITE_URL}{src}"
+                elif not src.startswith("http"):
+                    src = f"{self.WEBSITE_URL}/{src}"
                 self.logger.info(f"Found logo: {src}")
                 return src
         return None
