@@ -331,6 +331,10 @@ class BaseAgencyScraper(ABC):
         if not agency.role_levels:
             agency.role_levels = self.utils.fetch_role_levels(all_text, url)
         
+        # ==================== Geographic Coverage ====================
+        if not agency.regions_served:
+            agency.regions_served = self.utils.fetch_regions_served(all_text, url)
+        
         # ==================== Volume & Performance ====================
         if agency.volume_specialisation == "unknown":
             agency.volume_specialisation = self.utils.fetch_volume_specialisation(all_text, url)
