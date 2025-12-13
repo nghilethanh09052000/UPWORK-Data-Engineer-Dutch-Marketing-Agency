@@ -784,6 +784,120 @@ Proprietary - inhuren.nl
 
 ---
 
+## Data Quality Assessment (Client Feedback Review)
+
+**Assessment Date**: December 13, 2025  
+**Agencies Analyzed**: 15/15 (100%)  
+**Overall Data Completeness**: **43.8%** (35.5/81 fields average)
+
+### Quick Summary
+
+✅ **Excellent (100% compliance):**
+- Logo URLs: 15/15 agencies (1 WebP format issue)
+- Sector Normalization: 15/15 agencies (all properly normalized)
+- Portal Detection: 15/15 agencies (all portals detected)
+
+⚠️ **Good (70-80% compliance):**
+- Role Levels: 11/15 agencies (73% - 4 missing)
+- Regions Format: 11/15 agencies (73% - 4 need "landelijk" update)
+
+❌ **Needs Improvement (20% compliance):**
+- Review Sources: 3/15 agencies (20% - 12 missing)
+
+### Client Feedback Summary
+
+**✅ What's Working Well:**
+- JSON structure follows the model correctly
+- Company identity, regions, locations, and services captured properly
+- Compliance data (SNA/NEN/ISO) handled correctly
+- No personal data issues
+- Office locations and service offerings extracted accurately
+
+**⚠️ Improvements Needed:**
+
+1. **Logo Scraping** - Extract only PNG/SVG logos from header/footer (not banners)
+2. **Sector Normalization** - Restrict to normalized list (no "thuiswerk", "oproepkracht", "bezorging")
+3. **Portal Detection** - Better detection of login pages, "mijn..." dashboards, client portals
+4. **Role Levels** - Extract from indirect mentions (student, starter, medior, senior)
+5. **Review Sources** - Extract Google Reviews, Indeed, Trustpilot links from footers
+
+### Current Data Quality Status
+
+**Overall Completeness**: **43.8%** (35.5/81 fields filled on average)
+
+| Category | Status | Coverage | Notes |
+|----------|--------|----------|-------|
+| **Logo URLs** | ✅ **100%** (15/15) | Excellent | 1 agency (Hays) uses WebP format instead of PNG/SVG |
+| **Sector Normalization** | ✅ **100%** (15/15) | Excellent | All sectors properly normalized, no invalid categories found |
+| **Portal Detection** | ✅ **100%** (15/15) | Excellent | All agencies have portals detected (10 candidate-only, 5 both) |
+| **Role Levels** | ⚠️ **73%** (11/15) | Good | 4 agencies missing: Adecco, Maandag, Olympia, Yacht |
+| **Review Sources** | ⚠️ **20%** (3/15) | Needs Work | 12 agencies missing review sources |
+| **Regions Served** | ⚠️ **73%** (11/15) | Good | 4 agencies still use "heel_Nederland" instead of "landelijk" |
+
+**Logo Format Distribution:**
+- PNG: 7 agencies (47%)
+- SVG: 7 agencies (47%)
+- WebP: 1 agency (7%) - **Hays Nederland** (needs conversion to PNG/SVG)
+
+**Portal Detection Breakdown:**
+- Candidate portal only: 10 agencies (67%)
+- Both candidate & client: 5 agencies (33%)
+- Client portal only: 0 agencies
+- No portals: 0 agencies ✅
+
+**Agencies Needing Improvements:**
+
+1. **Role Levels Missing** (4 agencies):
+   - Adecco
+   - Maandag
+   - Olympia
+   - Yacht
+
+2. **Review Sources Missing** (12 agencies):
+   - Adecco, Randstad, Tempo-Team, Maandag, Covebo, Manpower, ASA Talent, Start People, YoungCapital, Brunel, Olympia, Hays Nederland
+
+3. **Regions Format** (4 agencies using "heel_Nederland"):
+   - Randstad, Covebo, Start People, YoungCapital
+
+4. **Logo Format** (1 agency):
+   - Hays Nederland (WebP instead of PNG/SVG)
+
+### Data Quality Score by Agency
+
+| Agency | Completeness | Logo | Sectors | Portals | Role Levels | Reviews | Status |
+|--------|--------------|------|---------|---------|-------------|---------|--------|
+| ASA Talent | ~45% | ✅ SVG | ✅ Normalized | ✅ Both | ✅ Found | ❌ Missing | Good |
+| Adecco | ~40% | ✅ PNG | ✅ Normalized | ✅ Candidate | ❌ Missing | ❌ Missing | Needs work |
+| Brunel | ~45% | ✅ PNG | ✅ Normalized | ✅ Both | ✅ Found | ❌ Missing | Good |
+| Covebo | ~50% | ✅ SVG | ✅ Normalized | ✅ Both | ✅ Found | ❌ Missing | Good |
+| Hays | ~40% | ⚠️ WebP | ✅ Normalized | ✅ Candidate | ✅ Found | ❌ Missing | Logo issue |
+| Maandag | ~40% | ✅ SVG | ✅ Normalized | ✅ Candidate | ❌ Missing | ❌ Missing | Needs work |
+| Manpower | ~45% | ✅ PNG | ✅ Normalized | ✅ Candidate | ✅ Found | ❌ Missing | Good |
+| Michael Page | ~40% | ✅ PNG | ✅ Normalized | ✅ Candidate | ✅ Found | ✅ Found | Excellent |
+| Olympia | ~45% | ✅ PNG | ✅ Normalized | ✅ Candidate | ❌ Missing | ❌ Missing | Needs work |
+| Randstad | ~50% | ✅ PNG | ✅ Normalized | ✅ Both | ✅ Found | ❌ Missing | Good |
+| Start People | ~45% | ✅ PNG | ✅ Normalized | ✅ Candidate | ✅ Found | ❌ Missing | Good |
+| Tempo-Team | ~50% | ✅ PNG | ✅ Normalized | ✅ Both | ✅ Found | ❌ Missing | Good |
+| TMI | ~40% | ✅ SVG | ✅ Normalized | ✅ Candidate | ✅ Found | ✅ Found | Excellent |
+| Yacht | ~45% | ✅ SVG | ✅ Normalized | ✅ Both | ❌ Missing | ✅ Found | Needs work |
+| YoungCapital | ~55% | ✅ PNG | ✅ Normalized | ✅ Candidate | ✅ Found | ❌ Missing | Excellent |
+
+**Average Completeness**: 43.8% (ranging from 40% to 55%)
+
+### Priority Fixes
+
+**High Priority:**
+1. ✅ **Sector Normalization** - Already fixed (100% compliance)
+2. ✅ **Portal Detection** - Already working (100% detection rate)
+3. ⚠️ **Review Sources** - 80% missing, needs extraction from footers/"Over ons" pages
+4. ⚠️ **Role Levels** - 27% missing, needs better indirect detection
+
+**Medium Priority:**
+5. ⚠️ **Logo Formats** - 1 agency (Hays) needs PNG/SVG conversion
+6. ⚠️ **Regions Format** - 4 agencies need "heel_Nederland" → "landelijk" update
+
+---
+
 ## Project Status
 
 **Last Updated**: December 13, 2025  
@@ -792,6 +906,7 @@ Proprietary - inhuren.nl
 - ✅ **13/15 agencies** with ~50%+ data extraction (YoungCapital, Tempo-Team, Olympia, Manpower, Start People, TMI, Yacht, Hays, Brunel, ASA Talent, Maandag, Michael Page, Adecco)
 - ⚠️ **2/15 agencies** need improvement (Randstad - missing office locations, Covebo - minimal data)
 **Field Coverage**: 67/81 fields implemented (83%)  
+**Data Completeness**: 43.8% average (35.5/81 fields filled)  
 **Utility Functions**: 69 reusable extraction methods in `utils.py`
 
 **Recent Milestones**:
