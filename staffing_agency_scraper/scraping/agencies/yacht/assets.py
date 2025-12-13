@@ -107,6 +107,7 @@ class YachtScraper(BaseAgencyScraper):
                 
                 if page_name == "home":
                     if self._detect_seamly_chatbot():
+                        agency.ai_capabilities.internal_ai_matching = True
                         agency.ai_capabilities.chatbot_for_candidates = True
                         agency.ai_capabilities.chatbot_for_clients = True
                         self.logger.info(f"✓ Detected Seamly chatbot (API check) | Source: Seamly API")

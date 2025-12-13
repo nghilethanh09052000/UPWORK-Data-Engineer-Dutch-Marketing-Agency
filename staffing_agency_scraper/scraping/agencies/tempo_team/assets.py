@@ -1215,6 +1215,7 @@ class TempoTeamScraper(BaseAgencyScraper):
                     agency.ai_capabilities = AICapabilities()
                 
                 # Set chatbot flags
+                agency.ai_capabilities.internal_ai_matching = True
                 agency.ai_capabilities.chatbot_for_candidates = True
                 agency.ai_capabilities.chatbot_for_clients = True
                 

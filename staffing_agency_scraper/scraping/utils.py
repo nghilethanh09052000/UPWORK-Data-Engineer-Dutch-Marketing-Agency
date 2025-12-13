@@ -15,6 +15,7 @@ from bs4 import BeautifulSoup
 from staffing_agency_scraper.models import (
     AgencyServices,
     CaoType,
+    GeoFocusType,
     OfficeLocation,
     PhaseSystem,
 )
@@ -678,6 +679,103 @@ class AgencyScraperUtils:
                     break
         
         return regions
+    
+    def fetch_geo_focus_type(self, text: str, url: str) -> GeoFocusType:
+        """
+        Extract geographic focus type from text.
+        
+        Returns one of:
+        - LOCAL: Local/city-level focus
+        - REGIONAL: Regional/province-level focus
+        - NATIONAL: National coverage (entire Netherlands)
+        - INTERNATIONAL: International/global presence
+        
+        Args:
+            text: Text to search in (page content)
+            url: URL for logging
+        
+        Returns:
+            GeoFocusType enum value
+        
+        Example:
+            >>> utils.fetch_geo_focus_type("Wij zijn actief in heel Nederland", url)
+            GeoFocusType.NATIONAL
+            >>> utils.fetch_geo_focus_type("Vestigingen in Amsterdam en Rotterdam", url)
+            GeoFocusType.REGIONAL
+        """
+        self.logger.info(f"🔍 Fetching geo focus type from {url}")
+        
+        text_lower = text.lower()
+        
+        # Check for international/global presence first (highest priority)
+        international_keywords = [
+            "internationaal", "international", "wereldwijd", "worldwide",
+            "global", "globale", "meerdere landen", "multiple countries",
+            "europa", "europe", "actief in", "operates in", "countries",
+            "landen", "internationale groep", "international group"
+        ]
+        if any(self._matches_keyword(keyword, text_lower) for keyword in international_keywords):
+            # Check if it's truly international (mentions multiple countries or global)
+            country_count_match = re.search(r'(\d+)\s*(?:landen|countries)', text_lower)
+            if country_count_match:
+                count = int(country_count_match.group(1))
+                if count >= 2:
+                    self.logger.info(f"✓ Found geo focus type: INTERNATIONAL ({count} countries) | Source: {url}")
+                    return GeoFocusType.INTERNATIONAL
+            
+            # Check for explicit international mentions
+            if any(phrase in text_lower for phrase in [
+                "internationale groep", "international group", "global presence",
+                "wereldwijd actief", "worldwide", "multiple countries"
+            ]):
+                self.logger.info(f"✓ Found geo focus type: INTERNATIONAL | Source: {url}")
+                return GeoFocusType.INTERNATIONAL
+        
+        # Check for national coverage
+        national_keywords = [
+            "landelijk", "nationaal", "national", "heel nederland",
+            "geheel nederland", "throughout the netherlands", "nationwide",
+            "national coverage", "alle provincies", "all provinces",
+            "landelijke dekking", "nationale dekking"
+        ]
+        if any(self._matches_keyword(keyword, text_lower) for keyword in national_keywords):
+            self.logger.info(f"✓ Found geo focus type: NATIONAL | Source: {url}")
+            return GeoFocusType.NATIONAL
+        
+        # Check for regional coverage (multiple provinces/regions mentioned)
+        regional_keywords = [
+            "regionaal", "regional", "provincie", "province",
+            "randstad", "noord-nederland", "zuid-nederland",
+            "oost-nederland", "west-nederland"
+        ]
+        province_count = 0
+        provinces = [
+            "noord-holland", "zuid-holland", "utrecht", "noord-brabant",
+            "gelderland", "limburg", "overijssel", "groningen",
+            "friesland", "flevoland", "zeeland", "drenthe"
+        ]
+        for province in provinces:
+            if self._matches_keyword(province, text_lower):
+                province_count += 1
+        
+        if province_count >= 2 or any(self._matches_keyword(keyword, text_lower) for keyword in regional_keywords):
+            self.logger.info(f"✓ Found geo focus type: REGIONAL ({province_count} provinces) | Source: {url}")
+            return GeoFocusType.REGIONAL
+        
+        # Check for local coverage (single city or very limited area)
+        # If only one city is mentioned prominently, it might be local
+        # But this is less common, so we'll default to REGIONAL if unclear
+        local_keywords = [
+            "lokaal", "local", "plaatselijk", "in de stad",
+            "binnen de gemeente", "within the city"
+        ]
+        if any(self._matches_keyword(keyword, text_lower) for keyword in local_keywords):
+            self.logger.info(f"✓ Found geo focus type: LOCAL | Source: {url}")
+            return GeoFocusType.LOCAL
+        
+        # Default to NATIONAL if unclear (most agencies are national)
+        self.logger.info(f"✓ Defaulting geo focus type: NATIONAL (no clear indication) | Source: {url}")
+        return GeoFocusType.NATIONAL
     
     # ========================================================================
     # SECTORS (Normalized list from client)
