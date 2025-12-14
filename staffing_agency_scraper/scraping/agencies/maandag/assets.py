@@ -67,6 +67,16 @@ class MaandagScraper(BaseAgencyScraper):
             "url": "https://www.maandag.com/nl-nl/certificeringen",
             "functions": ["certifications"],
         },
+        {
+            "name": "_",
+            "url": "https://www.maandag.com/nl-nl/werken-met-maandag/services/detachering",
+            "functions": [""],
+        },
+        {
+            "name": "_",
+            "url": "https://www.maandag.com/nl-nl/werken-met-maandag",
+            "functions": [""],
+        },
     ]
 
     def scrape(self) -> Agency:
@@ -81,7 +91,7 @@ class MaandagScraper(BaseAgencyScraper):
         # Known facts
         agency.membership = ["ABU"]
         agency.cao_type = CaoType.ABU
-        agency.regions_served = ["landelijk"]
+
         
         all_text = ""
         
@@ -142,6 +152,7 @@ class MaandagScraper(BaseAgencyScraper):
         agency.collected_at = self.collected_at
         
         self.logger.info(f"Completed scrape of {self.AGENCY_NAME}")
+        
         return agency
     
     def _apply_functions(

@@ -105,8 +105,7 @@ class ManpowerScraper(BaseAgencyScraper):
         if agency.contact_form_url not in self.evidence_urls:
             self.evidence_urls.append(agency.contact_form_url)
         
-        # Known facts about Manpower (from ManpowerGroup)
-        agency.regions_served = ["landelijk", "internationaal"]
+
         agency.volume_specialisation = VolumeSpecialisation.MASSA_50_PLUS  # Large-scale staffing
         
         all_text = ""
@@ -169,7 +168,11 @@ class ManpowerScraper(BaseAgencyScraper):
         # Update evidence URLs
         agency.evidence_urls = list(self.evidence_urls)
         agency.collected_at = self.collected_at
-        
+
+
+        with open('all_text.txt', 'w') as f:
+            f.write(all_text)
+            
         self.logger.info(f"Completed scrape of {self.AGENCY_NAME}")
         return agency
     

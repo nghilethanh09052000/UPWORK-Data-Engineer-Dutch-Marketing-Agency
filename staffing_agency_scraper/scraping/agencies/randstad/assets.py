@@ -160,9 +160,7 @@ class RandstadScraper(BaseAgencyScraper):
         self.logger.info(f"📄 Evidence URLs: {len(agency.evidence_urls)}")
         self.logger.info("=" * 80)
 
-        with open('all_text.txt', 'w') as f:
-            f.write(all_text)
-        
+      
         return agency
     
     def _apply_functions(
@@ -695,6 +693,7 @@ class RandstadScraper(BaseAgencyScraper):
                 
                 # Also check for ABU membership (mentioned in text)
                 if "abu" in cert_text_lower and "ABU" not in certs:
+                    agency.membership.append("ABU")
                     matched_cert = "ABU"
                 
                 if matched_cert and matched_cert not in certs:

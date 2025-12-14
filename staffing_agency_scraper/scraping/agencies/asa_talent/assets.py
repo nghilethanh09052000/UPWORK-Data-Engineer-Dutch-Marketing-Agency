@@ -201,12 +201,7 @@ class ASATalentScraper(BaseAgencyScraper):
             elif "NBBU" in agency.certifications:
                 agency.cao_type = CaoType.NBBU
                 agency.membership = ["NBBU"]
-        
-        # Derive regions_served from office locations
-        if agency.office_locations and len(agency.office_locations) >= 5:
-            # If offices in 5+ cities, likely national coverage
-            agency.regions_served = ["landelijk"]
-        
+
         # Extract digital capabilities from website
         agency.digital_capabilities = self._extract_digital_capabilities(all_text)
         
@@ -234,6 +229,7 @@ class ASATalentScraper(BaseAgencyScraper):
         self.logger.info(f"  Pages scraped: {len(self.evidence_urls)}")
 
         self.logger.info(f"Completed scrape of {self.AGENCY_NAME}")
+        
         return agency
 
     def _extract_logo(self, soup: BeautifulSoup) -> str | None:

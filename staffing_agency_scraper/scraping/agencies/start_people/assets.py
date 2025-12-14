@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Set
 import dagster as dg
 from bs4 import BeautifulSoup
 
-from staffing_agency_scraper.models import Agency, GeoFocusType, OfficeLocation
+from staffing_agency_scraper.models import Agency, CaoType, GeoFocusType, OfficeLocation
 from staffing_agency_scraper.scraping.base import BaseAgencyScraper
 from staffing_agency_scraper.scraping.utils import AgencyScraperUtils
 
@@ -60,7 +60,7 @@ class StartPeopleScraper(BaseAgencyScraper):
         },
         {
             "name": "privacy",
-            "url": "https://rgfstaffing.nl/privacy-statement-en",
+            "url": "https://startpeople.nl/legal/privacy-statement",
             "functions": ['legal_info'],
         },
     ]
@@ -170,8 +170,6 @@ class StartPeopleScraper(BaseAgencyScraper):
             elif func_name == "internal_jobs_filter":
                 self._extract_internal_jobs_filter(soup, agency, url)
             
-            elif func_name == "legal_info":
-                self._extract_legal_info(soup, agency, url)
     
     def _extract_header(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
         """
@@ -408,6 +406,18 @@ class StartPeopleScraper(BaseAgencyScraper):
                 agency.certifications.append("ABU")
                 certs_found.append("ABU")
                 self.logger.info(f"  → Certification: ABU (General Association of Temporary Employment Agencies)")
+                
+                # Add ABU to membership and set CAO type
+                if not agency.membership:
+                    agency.membership = []
+                if "ABU" not in agency.membership:
+                    agency.membership.append("ABU")
+                    self.logger.info(f"  → Membership: ABU | Source: {url}")
+                
+                # Set CAO type to ABU if not already set
+                if not agency.cao_type or agency.cao_type == CaoType.ONBEKEND:
+                    agency.cao_type = CaoType.ABU
+                    self.logger.info(f"  → CAO type: ABU (from ABU membership) | Source: {url}")
             
             # SNA (Stichting Normering Arbeid)
             if "sna" in text or "normering arbeid" in text:
@@ -514,8 +524,10 @@ class StartPeopleScraper(BaseAgencyScraper):
         """
         Extract all office locations from paginated vestigingen pages.
         Iterates through pages 1-8.
+        Deduplicates offices based on city + postcode combination.
         """
         all_offices = []
+        seen_offices = set()  # Track unique offices by (city, postcode) tuple
         
         for page_num in range(1, 9):  # Pages 1 through 8
             if page_num == 1:
@@ -540,6 +552,7 @@ class StartPeopleScraper(BaseAgencyScraper):
                     break
                 
                 offices_on_page = 0
+                duplicates_on_page = 0
                 for card in office_cards:
                     try:
                         # Extract office name
@@ -573,6 +586,17 @@ class StartPeopleScraper(BaseAgencyScraper):
                             else:
                                 continue
                         
+                        # Create unique identifier for deduplication
+                        office_key = (city.lower().strip(), postcode.strip() if postcode else "")
+                        
+                        # Skip if we've already seen this office
+                        if office_key in seen_offices:
+                            duplicates_on_page += 1
+                            continue
+                        
+                        # Mark as seen
+                        seen_offices.add(office_key)
+                        
                         # Extract phone
                         phone_link = card.find("a", href=lambda x: x and "tel:" in x)
                         phone = phone_link.get("href").replace("tel:", "").strip() if phone_link else None
@@ -595,7 +619,10 @@ class StartPeopleScraper(BaseAgencyScraper):
                         self.logger.warning(f"Error parsing office card: {e}")
                         continue
                 
-                self.logger.info(f"✓ Extracted {offices_on_page} offices from page {page_num}")
+                if duplicates_on_page > 0:
+                    self.logger.info(f"✓ Extracted {offices_on_page} new offices from page {page_num} ({duplicates_on_page} duplicates skipped)")
+                else:
+                    self.logger.info(f"✓ Extracted {offices_on_page} offices from page {page_num}")
                 
             except Exception as e:
                 self.logger.error(f"Error fetching page {page_num}: {e}")
@@ -603,7 +630,7 @@ class StartPeopleScraper(BaseAgencyScraper):
         
         if all_offices:
             agency.office_locations = all_offices
-            self.logger.info(f"✅ Total offices extracted: {len(all_offices)} across 8 pages")
+            self.logger.info(f"✅ Total unique offices extracted: {len(all_offices)} (deduplicated)")
             
             # Set HQ from first office if not already set
             if all_offices and not agency.hq_city:
@@ -612,9 +639,11 @@ class StartPeopleScraper(BaseAgencyScraper):
     
     def _extract_legal_info(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
         """
-        Extract legal information from RGF Staffing privacy statement.
+        Extract legal information from Start People privacy statement page.
         
-        URL: https://rgfstaffing.nl/privacy-statement-en (HTML page with PDF link or direct PDF)
+        URL: https://startpeople.nl/legal/privacy-statement (HTML page with PDF link)
+        
+        The page contains a link to the actual PDF at https://rgfstaffing.nl/privacy-statement
         
         Expected data from PDF:
         - Legal name: "RGF Staffing the Netherlands B.V."
@@ -623,78 +652,84 @@ class StartPeopleScraper(BaseAgencyScraper):
         - Parent: "Recruit Holdings Co. Ltd"
         """
         try:
-            # First, try to find PDF link in HTML
+            # Find the PDF link in the sfContentBlock div
             pdf_url = None
             pdf_text = ""
-            pdf_link = soup.find("a", href=lambda x: x and '.pdf' in str(x).lower())
             
-            if pdf_link:
-                pdf_url = pdf_link.get("href")
-                if not pdf_url.startswith("http"):
-                    pdf_url = f"https://rgfstaffing.nl{pdf_url}" if pdf_url.startswith("/") else f"https://rgfstaffing.nl/{pdf_url}"
-                self.logger.info(f"🔗 Found PDF link in HTML: {pdf_url}")
-            else:
-                # Maybe the URL itself is the PDF or redirects to it
-                # Use the attached PDF file path
-                pdf_path = "/Users/nghilethanh/Project/UPWORK-Scraping-Staffing-Agency/staffing_agency_scraper/scraping/agencies/start_people/08-1-privacy-statement-rgf-staffing-en-def-17102025.pdf"
-                self.logger.info(f"📁 Using local PDF file: {pdf_path}")
+            # Look for the link in the content block
+            content_block = soup.find("div", class_=lambda x: x and "sfContentBlock" in x)
+            if content_block:
+                # Find the link to the privacy statement PDF
+                pdf_link = content_block.find("a", href=lambda x: x and "privacy-statement" in str(x).lower())
+                if pdf_link:
+                    pdf_url = pdf_link.get("href")
+                    # Make absolute URL if relative
+                    if pdf_url and not pdf_url.startswith("http"):
+                        if pdf_url.startswith("/"):
+                            pdf_url = f"https://rgfstaffing.nl{pdf_url}"
+                        else:
+                            pdf_url = f"https://rgfstaffing.nl/{pdf_url}"
+                    self.logger.info(f"🔗 Found PDF link in HTML: {pdf_url}")
+            
+            # Fallback: try to find any link with .pdf or privacy-statement
+            if not pdf_url:
+                pdf_link = soup.find("a", href=lambda x: x and ('.pdf' in str(x).lower() or 'privacy-statement' in str(x).lower()))
+                if pdf_link:
+                    pdf_url = pdf_link.get("href")
+                    if pdf_url and not pdf_url.startswith("http"):
+                        if pdf_url.startswith("/"):
+                            pdf_url = f"https://rgfstaffing.nl{pdf_url}"
+                        else:
+                            pdf_url = f"https://rgfstaffing.nl/{pdf_url}"
+                    self.logger.info(f"🔗 Found PDF link (fallback): {pdf_url}")
+            
+            if not pdf_url:
+                self.logger.warning(f"⚠ No PDF link found on privacy statement page | Source: {url}")
+                return
+            
+            # Add PDF URL to evidence URLs
+            self.evidence_urls.append(pdf_url)
+            self.logger.info(f"✓ Added PDF URL to evidence_urls: {pdf_url}")
+            
+            # Download and parse the PDF
+            import requests
+            import io
+            import pdfplumber
+            
+            try:
+                self.logger.info(f"⬇️  Downloading PDF from: {pdf_url}")
+                response = requests.get(pdf_url, timeout=30)
+                response.raise_for_status()
                 
-                # Parse local PDF using pdfplumber
-                import pdfplumber
+                # Check if it's actually a PDF
+                content_type = response.headers.get('content-type', '').lower()
+                if 'pdf' not in content_type and not pdf_url.lower().endswith('.pdf'):
+                    self.logger.warning(f"⚠ Response may not be a PDF (content-type: {content_type}) | Source: {pdf_url}")
                 
-                try:
-                    self.logger.info(f"⬇️  Opening local PDF: {pdf_path}")
-                    pdf_text = ""
-                    
-                    with pdfplumber.open(pdf_path) as pdf:
-                        self.logger.info(f"📄 PDF has {len(pdf.pages)} pages")
-                        for page_num, page in enumerate(pdf.pages, 1):
-                            page_text = page.extract_text() or ""
-                            pdf_text += page_text + " "
-                            # Debug first 2 pages
-                            if page_num <= 2:
-                                self.logger.info(f"   Page {page_num} preview (first 400 chars): {page_text[:400]}...")
-                    
-                    self.logger.info(f"📄 Extracted PDF text, total length: {len(pdf_text)} chars")
+                # Parse PDF
+                pdf_file = io.BytesIO(response.content)
+                pdf_text = ""
                 
-                except Exception as pdf_error:
-                    self.logger.error(f"❌ Error parsing local PDF: {pdf_error}")
-                    import traceback
-                    self.logger.error(f"   Traceback: {traceback.format_exc()}")
-                    return
+                with pdfplumber.open(pdf_file) as pdf:
+                    self.logger.info(f"📄 PDF has {len(pdf.pages)} pages")
+                    for page_num, page in enumerate(pdf.pages, 1):
+                        page_text = page.extract_text() or ""
+                        pdf_text += page_text + " "
+                        # Debug first page
+                        if page_num == 1:
+                            self.logger.info(f"   Page 1 preview (first 300 chars): {page_text[:300]}...")
+                
+                self.logger.info(f"📄 Extracted PDF text, total length: {len(pdf_text)} chars")
+            
+            except Exception as pdf_error:
+                self.logger.error(f"❌ Error downloading/parsing PDF: {pdf_error}")
+                import traceback
+                self.logger.error(f"   Traceback: {traceback.format_exc()}")
+                return
             
             if not pdf_text or len(pdf_text) < 100:
-                # Fallback to remote PDF download
-                if pdf_url:
-                    import requests
-                    import io
-                    
-                    try:
-                        self.logger.info(f"⬇️  Downloading PDF from: {pdf_url}")
-                        response = requests.get(pdf_url, timeout=30)
-                        response.raise_for_status()
-                        
-                        # Parse PDF
-                        pdf_file = io.BytesIO(response.content)
-                        pdf_text = ""
-                        
-                        with pdfplumber.open(pdf_file) as pdf:
-                            self.logger.info(f"📄 Remote PDF has {len(pdf.pages)} pages")
-                            for page_num, page in enumerate(pdf.pages, 1):
-                                page_text = page.extract_text() or ""
-                                pdf_text += page_text + " "
-                                # Debug first page
-                                if page_num == 1:
-                                    self.logger.info(f"   Page 1 preview (first 300 chars): {page_text[:300]}...")
-                        
-                        self.logger.info(f"📄 Extracted remote PDF text, total length: {len(pdf_text)} chars")
-                    
-                    except Exception as remote_error:
-                        self.logger.error(f"❌ Error downloading/parsing remote PDF: {remote_error}")
-                        return
-                else:
-                    self.logger.warning(f"⚠ No PDF content extracted and no remote URL available | Source: {url}")
-                    return
+                self.logger.warning(f"⚠ PDF text too short or empty (length: {len(pdf_text)}) | Source: {pdf_url}")
+                return
             
             # Debug: Show sample around phone keywords
             self.logger.info(f"🔍 Searching for keywords in PDF text (length: {len(pdf_text)})...")

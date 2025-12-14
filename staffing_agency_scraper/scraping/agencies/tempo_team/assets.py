@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 from staffing_agency_scraper.models import (
     Agency,
     AICapabilities,
+    CaoType,
     DigitalCapabilities,
     GeoFocusType,
     OfficeLocation,
@@ -383,11 +384,25 @@ class TempoTeamScraper(BaseAgencyScraper):
                 agency.certifications = []
             
             # ABU membership
+            abu_found = False
             if re.search(r'\bABU\b', article_text):
                 cert = "ABU"
                 if cert not in agency.certifications:
                     agency.certifications.append(cert)
                     self.logger.info(f"✓ Certification: {cert} | Source: {url}")
+                
+                # Add ABU to membership and set CAO type
+                abu_found = True
+                if not agency.membership:
+                    agency.membership = []
+                if "ABU" not in agency.membership:
+                    agency.membership.append("ABU")
+                    self.logger.info(f"✓ Membership: ABU | Source: {url}")
+                
+                # Set CAO type to ABU if not already set
+                if not agency.cao_type or agency.cao_type == CaoType.ONBEKEND:
+                    agency.cao_type = CaoType.ABU
+                    self.logger.info(f"✓ CAO type: ABU (from ABU membership) | Source: {url}")
             
             # NEN 4400-1 / SNA
             if re.search(r'NEN\s*4400-1|SNA', article_text, re.IGNORECASE):

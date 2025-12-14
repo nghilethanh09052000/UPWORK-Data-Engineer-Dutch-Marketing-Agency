@@ -147,6 +147,7 @@ class HaysScraper(BaseAgencyScraper):
         agency.collected_at = self.collected_at
 
         self.logger.info(f"Completed scrape of {self.AGENCY_NAME}")
+        
         return agency
 
     def _apply_functions(

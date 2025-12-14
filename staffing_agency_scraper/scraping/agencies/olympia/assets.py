@@ -77,6 +77,8 @@ class OlympiaScraper(BaseAgencyScraper):
         
         all_sectors: Set[str] = set()
         page_texts: Dict[str, str] = {}
+
+        all_text = ""
         
         for page in self.PAGES_TO_SCRAPE:
             url = page["url"]
@@ -87,6 +89,7 @@ class OlympiaScraper(BaseAgencyScraper):
                 soup = self.fetch_page(url)
                 page_text = soup.get_text(separator=" ", strip=True)
                 page_texts[url] = page_text
+                all_text += " " + page_text
                 
                 # Apply normal functions
                 self._apply_functions(agency, functions, soup, page_text, all_sectors, url)
@@ -97,9 +100,7 @@ class OlympiaScraper(BaseAgencyScraper):
                 if self.utils.detect_client_portal(soup, page_text, url):
                     agency.digital_capabilities.client_portal = True
                 
-     
-                agency.role_levels = []
-                
+                     
             except Exception as e:
                 self.logger.error(f"❌ Error scraping {url}: {e}")
         
@@ -114,6 +115,16 @@ class OlympiaScraper(BaseAgencyScraper):
         
         agency.evidence_urls = list(self.evidence_urls)
         agency.collected_at = self.collected_at
+
+        # ========================================================================
+        # Extract ALL common fields using base class utility method! 🚀
+        # This replaces 50+ lines of repetitive extraction code
+        # ========================================================================
+        self.extract_all_common_fields(agency, all_text)
+
+        with open('all_text.txt', 'w') as f:    
+            f.write(all_text)
+        
         
         self.logger.info(f"✅ Completed scrape of {self.AGENCY_NAME}")
         
