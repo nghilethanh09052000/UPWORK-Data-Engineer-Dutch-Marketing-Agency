@@ -1518,42 +1518,124 @@ class AgencyScraperUtils:
     def fetch_volume_specialisation(self, text: str, url: str) -> str:
         """
         Infer volume specialisation from text.
-        
+
         Returns one of:
-        - ad_hoc_1_5: Ad-hoc placements (1-5 people)
-        - pools_5_50: Pool management (5-50 people)
-        - massa_50_plus: Mass recruitment (50+ people)
-        - unknown
+        - ad_hoc_1_5       : Ad-hoc / niche / specialist placements (1-5 people)
+        - pools_5_50       : Pool management (5-50 people)
+        - massa_50_plus    : Mass recruitment (50+ people)
+        - unknown          : Cannot determine
         """
+
         self.logger.info(f"🔍 Fetching volume specialisation from {url}")
-        
+
         text_lower = text.lower()
-        
-        # Check for mass recruitment indicators
-        if any(keyword in text_lower for keyword in [
-            "massa", "hoog volume", "100+", "grote aantallen", "bulk",
-            "seizoen", "piek", "grootschalig"
-        ]):
-            self.logger.info(f"✓ Found volume specialisation: massa_50_plus | Source: {url}")
+
+        # -------------------------------
+        # MASS RECRUITMENT (50+)
+        # -------------------------------
+        mass_strong = [
+            "mass recruitment",
+            "grootschalige werving",
+            "bulk recruitment",
+            "high volume recruitment",
+            "100+ medewerkers",
+            "honderden medewerkers",
+            "grote volumes",
+            "duizenden bedrijven",
+            "tijdelijk en vast personeel",
+            "snel personeel nodig",
+            "continu instroom",
+            "landelijke opschaling",
+            "meerdere locaties tegelijk",
+            "landelijk actief",
+            "internationaal netwerk",
+            "grote klanten",
+            "grote organisaties",
+        ]
+
+        mass_weak = [
+            "piek",
+            "piekbelasting",
+            "seizoenswerk",
+            "seizoenspieken",
+            "hoog volume",
+            "grote aantallen",
+            "grootschalig",
+            "opschalen",
+            "opschaling",
+            "24/7 bezetting",
+            "ploegendiensten",
+        ]
+
+        # -------------------------------
+        # POOL MANAGEMENT (5–50)
+        # -------------------------------
+        pool_strong = [
+            "flexpool",
+            "talentpool",
+            "talent pool",
+            "vaste pool",
+            "kandidatenpool",
+            "poolmanagement",
+            "inzetpool",
+            "vaste flexibele schil",
+        ]
+
+        pool_weak = [
+            "pool",
+            "bestand",
+            "database",
+            "vaste groep medewerkers",
+            "terugkerende krachten",
+            "langdurige inzet",
+            "planning en beschikbaarheid",
+            "roosterplanning",
+            "structurele inzet",
+        ]
+
+        # -------------------------------
+        # AD-HOC / SPECIALIST (1–5)
+        # -------------------------------
+        adhoc_keywords = [
+            "executive search",
+            "direct search",
+            "headhunting",
+            "headhunter",
+            "niche",
+            "schaarse profielen",
+            "zeer specialistisch",
+            "hoogopgeleid specialist",
+            "1-op-1 bemiddeling",
+            "persoonlijke search",
+            "maatwerk voor sleutelposities",
+        ]
+
+        # -------------------------------
+        # MATCHING LOGIC
+        # -------------------------------
+
+        # MASS: 1 strong OR 2 weak indicators
+        if any(k in text_lower for k in mass_strong) or \
+        sum(1 for k in mass_weak if k in text_lower) >= 2:
+            self.logger.info(f"✓ Volume specialisation: massa_50_plus | Source: {url}")
             return "massa_50_plus"
-        
-        # Check for pool management indicators
-        if any(keyword in text_lower for keyword in [
-            "pool", "flexpool", "bestand", "database", "50 kandidaten",
-            "talent pool", "candidate pool"
-        ]):
-            self.logger.info(f"✓ Found volume specialisation: pools_5_50 | Source: {url}")
+
+        # POOL: 1 strong OR 2 weak indicators
+        if any(k in text_lower for k in pool_strong) or \
+        sum(1 for k in pool_weak if k in text_lower) >= 2:
+            self.logger.info(f"✓ Volume specialisation: pools_5_50 | Source: {url}")
             return "pools_5_50"
-        
-        # Check for ad-hoc/small scale indicators
-        if any(keyword in text_lower for keyword in [
-            "maatwerk", "bespoke", "specialist", "exact match", "1-op-1",
-            "individueel", "niche"
-        ]):
-            self.logger.info(f"✓ Found volume specialisation: ad_hoc_1_5 | Source: {url}")
+
+        # AD-HOC: any strong indicator
+        if any(k in text_lower for k in adhoc_keywords):
+            self.logger.info(f"✓ Volume specialisation: ad_hoc_1_5 | Source: {url}")
             return "ad_hoc_1_5"
-        
+
+        # Fallback
+        self.logger.info(f"⚠ Volume specialisation: unknown | Source: {url}")
         return "unknown"
+
+
     
     def fetch_pricing_model(self, text: str, url: str) -> str:
         """

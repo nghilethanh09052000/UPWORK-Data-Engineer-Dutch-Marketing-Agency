@@ -107,9 +107,10 @@ class AdeccoScraper(BaseAgencyScraper):
         try:
             logo_soup = self._fetch_page_safe(self.LOGO_PAGE_URL)
             if logo_soup:
-                agency.logo_url = self.utils.fetch_logo(logo_soup, self.LOGO_PAGE_URL)
+                agency.logo_url = self._extract_logo(logo_soup)
                 if not agency.logo_url:
-                    agency.logo_url = self._extract_logo(logo_soup)
+                    agency.logo_url = self.utils.fetch_logo(logo_soup, self.LOGO_PAGE_URL)
+
         except Exception as e:
             self.logger.warning(f"Error fetching logo page: {e}")
 
@@ -226,7 +227,7 @@ class AdeccoScraper(BaseAgencyScraper):
                     existing.add(sector)
         agency.services = self._extract_services(all_text)
         agency.focus_segments = self._extract_focus_segments(all_text)
-        agency.regions_served = self._extract_regions(all_text)
+        # regions_served will be extracted by extract_all_common_fields using standard format
         
         # Extract certifications from PDF certificate
         agency.certifications = self._fetch_pdf_certifications()
@@ -268,8 +269,12 @@ class AdeccoScraper(BaseAgencyScraper):
         # Update evidence URLs
         agency.evidence_urls = self.evidence_urls.copy()
         agency.collected_at = self.collected_at
+        agency.services = self.utils.fetch_services(all_text, 'accumulated_text')
 
         self.logger.info(f"Completed scrape of {self.AGENCY_NAME}")
+
+        with open('all_text.txt', 'w') as f:
+            f.write(all_text)
         return agency
 
     def _fetch_jobs_from_api(self) -> dict | None:
