@@ -141,7 +141,7 @@ class TMIScraper(BaseAgencyScraper):
         self.logger.info("✅ Automatic utils extractions completed")
         self.logger.info("=" * 80)
         
-        agency.evidence_urls = list(self.evidence_urls)
+        agency.evidence_urls = self.get_filtered_evidence_urls()
         agency.collected_at = self.collected_at
         
         self.logger.info("=" * 80)
@@ -275,72 +275,15 @@ class TMIScraper(BaseAgencyScraper):
     def _extract_reviews(
         self, soup: BeautifulSoup, page_text: str, agency: Agency, url: str
     ) -> None:
-        """Extract Google reviews from homepage, including count and average rating."""
-        self.logger.info(f"🔍 Extracting reviews from {url}")
+        """
+        Review extraction removed per client requirement.
         
-        # Find Google review section
-        review_section = soup.find("section", id="section-google-review")
-        if not review_section:
-            self.logger.warning(f"⚠ Review section not found on {url}")
-            return
-        
-        self.logger.info(f"✓ Google review section found | Source: {url}")
-        
-        # Count review cards
-        review_cards = review_section.find_all("div", class_="indrevdiv")
-        review_count = len(review_cards)
-        
-        if review_count > 0:
-            self.logger.info(f"✓ Found {review_count} visible review cards | Source: {url}")
-            
-            # Calculate average rating by counting stars in each card
-            total_rating = 0
-            ratings_found = 0
-            
-            for card in review_cards:
-                # Find star container
-                star_div = card.find("div", class_="wpproslider_t6_star_DIV")
-                if star_div:
-                    # Count filled stars (svg-wprsp-star)
-                    filled_stars = star_div.find_all("span", class_="svg-wprsp-star")
-                    # Count empty stars (svg-wprsp-star-o)
-                    empty_stars = star_div.find_all("span", class_="svg-wprsp-star-o")
-                    
-                    rating = len(filled_stars)
-                    if rating > 0:
-                        total_rating += rating
-                        ratings_found += 1
-                        self.logger.info(f"  Review {ratings_found}: {rating} stars (filled: {len(filled_stars)}, empty: {len(empty_stars)})")
-            
-            # Calculate average rating
-            if ratings_found > 0:
-                avg_rating = round(total_rating / ratings_found, 1)
-                agency.review_rating = avg_rating
-                agency.review_count = review_count
-                self.logger.info(f"✓ Review rating: {avg_rating}/5.0 (from {ratings_found} reviews) | Source: {url}")
-                self.logger.info(f"✓ Review count: {review_count} visible reviews | Source: {url}")
-        
-        # Check for Google logo/links in the review section
-        google_indicators = (
-            review_section.find_all("a", href=lambda x: x and "google.com" in x) or
-            review_section.find_all("img", alt=lambda x: x and "google" in x.lower() if x else False)
-        )
-        
-        if google_indicators:
-            # Add Google as review source
-            if not agency.review_sources:
-                agency.review_sources = ["Google"]
-            elif "Google" not in agency.review_sources:
-                agency.review_sources.append("Google")
-            self.logger.info(f"✓ Review source: Google | Source: {url}")
-            
-            # Add growth signal for having visible Google reviews
-            signal = "google_reviews_visible"
-            if signal not in agency.growth_signals:
-                agency.growth_signals.append(signal)
-                self.logger.info(f"✓ Growth signal: {signal} | Source: {url}")
-        else:
-            self.logger.warning(f"⚠ Review section found but no Google indicators | Source: {url}")
+        Rule: Review data may only be included if shown or linked on the agency's own website.
+        Calculated ratings from visible review cards are not allowed.
+        """
+        # Removed: Calculated review rating and count extraction
+        # Reviews must be explicitly shown/linked on the website, not calculated
+        pass
     
     def _extract_footer(
         self, soup: BeautifulSoup, page_text: str, agency: Agency, url: str
@@ -362,12 +305,6 @@ class TMIScraper(BaseAgencyScraper):
         if phone_match and not agency.contact_phone:
             agency.contact_phone = "020-7173527"
             self.logger.info(f"✓ Contact phone: {agency.contact_phone} | Source: {url}")
-        
-        # Email: info@tmi.nl
-        email_match = re.search(r'info@tmi\.nl', footer_text)
-        if email_match and not agency.contact_email:
-            agency.contact_email = "info@tmi.nl"
-            self.logger.info(f"✓ Contact email: {agency.contact_email} | Source: {url}")
         
         # HQ Address: Processorstraat 12, 1033 NZ Amsterdam
         address_match = re.search(r'Processorstraat\s+12', footer_text, re.IGNORECASE)
@@ -455,11 +392,6 @@ class TMIScraper(BaseAgencyScraper):
             if phone:
                 agency.contact_phone = phone
         
-        # Extract email if not already set
-        if not agency.contact_email:
-            email = self.utils.fetch_contact_email(page_text, url)
-            if email:
-                agency.contact_email = email
         
         # Check for 24/7 or flexible availability from flex desk info
         if "buiten kantooruren" in page_text.lower() or "during and outside office hours" in page_text.lower():
@@ -748,9 +680,15 @@ class TMIScraper(BaseAgencyScraper):
                         self.logger.info(f"✓ Region: {region} (fallback) | Source: {url}")
                         break
         
-        # Sort and deduplicate regions_served
+        # Normalize regions_served to use only controlled labels
         if agency.regions_served:
-            agency.regions_served = sorted(list(set(agency.regions_served)))
+            from staffing_agency_scraper.lib.normalize import normalize_regions_served
+            original_regions = agency.regions_served.copy()
+            agency.regions_served = normalize_regions_served(agency.regions_served)
+            
+            if original_regions != agency.regions_served:
+                self.logger.info(f"✓ Normalized regions: {original_regions} -> {agency.regions_served} | Source: {url}")
+            
             self.logger.info(f"✓ Total regions served: {len(agency.regions_served)} | Source: {url}")
             
             # Add URL to evidence

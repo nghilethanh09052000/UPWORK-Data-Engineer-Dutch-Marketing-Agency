@@ -128,9 +128,8 @@ class YoungCapitalScraper(BaseAgencyScraper):
                     agency.role_levels = list(set(agency.role_levels))
                 
                 # Extract review sources
-                review_sources = self.utils.fetch_review_sources(soup, url)
-                if review_sources and not agency.review_sources:
-                    agency.review_sources = review_sources
+                # Review extraction removed per client requirement
+                # Reviews must be explicitly shown/linked on the website, not inferred
                 
                 self.logger.info(f"✅ Completed: {page_name}")
                 
@@ -153,13 +152,16 @@ class YoungCapitalScraper(BaseAgencyScraper):
         self.logger.info("=" * 80)
 
         
-        agency.evidence_urls = list(self.evidence_urls)
+        agency.evidence_urls = self.get_filtered_evidence_urls()
         agency.collected_at = self.collected_at
         
         self.logger.info("=" * 80)
         self.logger.info(f"✅ Completed scrape of {self.AGENCY_NAME}")
         self.logger.info(f"📄 Evidence URLs: {len(agency.evidence_urls)}")
         self.logger.info("=" * 80)
+
+        with open('all_text.txt', 'w') as f:    
+            f.write(all_text)
 
         
         return agency
@@ -182,19 +184,19 @@ class YoungCapitalScraper(BaseAgencyScraper):
                 services = self.utils.fetch_services(page_text, url)
                 agency.services = services
             
-            elif func_name == "contact":
-                email = self.utils.fetch_contact_email(page_text, url)
-                phone = self.utils.fetch_contact_phone(page_text, url)
-                offices = self.utils.fetch_office_locations(soup, url)
-                if email:
-                    agency.contact_email = email
-                if phone:
-                    agency.contact_phone = phone
-                if offices:
-                    agency.office_locations = offices
-                    if offices and not agency.hq_city:
-                        agency.hq_city = offices[0].city
-                        agency.hq_province = offices[0].province
+            # elif func_name == "contact":
+            #     #email = self.utils.fetch_contact_email(page_text, url)
+            #     #phone = self.utils.fetch_contact_phone(page_text, url)
+            #     #offices = self.utils.fetch_office_locations(soup, url)
+            #     if email:
+            #         agency.contact_email = email
+            #     if phone:
+            #         agency.contact_phone = phone
+            #     if offices:
+            #         agency.office_locations = offices
+            #         if offices and not agency.hq_city:
+            #             agency.hq_city = offices[0].city
+            #             agency.hq_province = offices[0].province
             
             elif func_name == "legal":
                 kvk = self.utils.fetch_kvk_number(page_text, url)
@@ -272,7 +274,8 @@ class YoungCapitalScraper(BaseAgencyScraper):
                                 self.logger.info(f"✓ Phone: {agency.contact_phone} | Source: {url}")
                             
                             if "email" in contact and not agency.contact_email:
-                                agency.contact_email = contact["email"]
+                                # agency.contact_email = contact["email"]
+                                agency.contact_email = None
                                 self.logger.info(f"✓ Email: {agency.contact_email} | Source: {url}")
                         
                         # Extract VAT ID (BTW-nummer) - extract KvK from it
@@ -759,56 +762,24 @@ class YoungCapitalScraper(BaseAgencyScraper):
                     else:
                         continue
                 
-                # Apply unit multiplier
-                if unit == "M":
-                    value = int(value * 1_000_000)
-                elif unit == "K":
-                    value = int(value * 1_000)
+                # Do NOT extract statistics if they require calculation (M/K unit conversion)
+                # Client feedback: avoid all calculations, set to null if not explicitly stated as exact number
+                if unit == "M" or unit == "K":
+                    # Skip if unit conversion is required (M = millions, K = thousands)
+                    self.logger.info(f"  Skipped statistic (requires calculation: {value}{unit} = {unit} conversion) - label: '{label}' | Source: {url}")
+                    continue
                 else:
+                    # Only extract if it's an exact number without unit conversion
                     value = int(value)
                 
-                # Map to agency fields based on label
-                if "kandidaten in database" in label or "candidates in database" in label:
-                    if not agency.candidate_pool_size_estimate or agency.candidate_pool_size_estimate < value:
-                        agency.candidate_pool_size_estimate = value
-                        self.logger.info(f"✓ Candidate pool size: {value:,} | Source: {url}")
-                
-                elif "kandidaten per dag" in label or "candidates per day" in label:
-                    # Calculate annual placements: daily * 365
-                    annual_placements = value * 365
-                    if not agency.annual_placements_estimate or agency.annual_placements_estimate < annual_placements:
-                        agency.annual_placements_estimate = annual_placements
-                        self.logger.info(f"✓ Annual placements estimate: {annual_placements:,} (from {value:,} per day) | Source: {url}")
-                
-                elif "kandidaten per week" in label or "candidates per week" in label:
-                    # Calculate annual placements: weekly * 52
-                    annual_placements = value * 52
-                    if not agency.annual_placements_estimate or agency.annual_placements_estimate < annual_placements:
-                        agency.annual_placements_estimate = annual_placements
-                        self.logger.info(f"✓ Annual placements estimate: {annual_placements:,} (from {value:,} per week) | Source: {url}")
-                
-                elif "vestigingen" in label or "offices" in label or "locations" in label:
-                    # This is just a count, not a field we track separately
-                    # (we already extract actual office locations)
-                    self.logger.info(f"  Found office count: {value} | Source: {url}")
+                # TODO: Map value to correct field based on label (candidate_pool, annual_placements, etc.)
+                # Only assign if label explicitly matches the field purpose
+                # For now, we don't assign to avoid incorrect inference
+                self.logger.info(f"  Found statistic: {value:,} (no unit, no calculation) - label: '{label}' (not assigned per client feedback)")
                 
             except (ValueError, AttributeError) as e:
                 self.logger.warning(f"  Error parsing statistic: {e}")
                 continue
-        
-        # Also check for mentions in text (e.g., "meer dan 20.000 kandidaten per week")
-        page_text = soup.get_text(separator=" ", strip=True)
-        
-        # Pattern: "meer dan 20.000 kandidaten per week"
-        weekly_match = re.search(r'(\d+(?:[.,]\d+)?)\s*(?:k|duizend|thousand)?\s*kandidaten\s*per\s*week', page_text.lower())
-        if weekly_match:
-            weekly_value = float(weekly_match.group(1).replace(',', '.'))
-            if 'k' in weekly_match.group(0) or 'duizend' in weekly_match.group(0):
-                weekly_value = weekly_value * 1_000
-            annual_placements = int(weekly_value * 52)
-            if not agency.annual_placements_estimate or agency.annual_placements_estimate < annual_placements:
-                agency.annual_placements_estimate = annual_placements
-                self.logger.info(f"✓ Annual placements estimate: {annual_placements:,} (from text: {weekly_value:,.0f} per week) | Source: {url}")
         
         self.logger.info(f"✓ Statistics extraction completed | Source: {url}")
     
@@ -1047,19 +1018,15 @@ class YoungCapitalScraper(BaseAgencyScraper):
                 agency.takeover_policy.overname_contract_reference = url
         
         # Extract minimum assignment duration
-        # Pattern: "minimaal X weken", "minimum X maanden"
-        min_duration_match = re.search(r'minim(?:aal|um)\s+(\d+)\s+(?:weken?|maanden?)', pdf_text_lower)
+        # Do NOT calculate conversions (months to weeks) - client feedback: avoid all calculations
+        # Only extract if explicitly stated in weeks
+        min_duration_match = re.search(r'minim(?:aal|um)\s+(\d+)\s+weken?', pdf_text_lower)
         if min_duration_match:
-            duration = int(min_duration_match.group(1))
-            unit = min_duration_match.group(0).split()[-1]
-            if "maand" in unit:
-                duration_weeks = duration * 4
-            else:
-                duration_weeks = duration
+            duration_weeks = int(min_duration_match.group(1))
             
             if not agency.min_assignment_duration_weeks or agency.min_assignment_duration_weeks > duration_weeks:
                 agency.min_assignment_duration_weeks = duration_weeks
-                self.logger.info(f"✓ Min assignment duration: {duration_weeks} weeks | Source: {url}")
+                self.logger.info(f"✓ Min assignment duration (exact, no calculation): {duration_weeks} weeks | Source: {url}")
         
         # Extract minimum hours per week
         min_hours_match = re.search(r'minim(?:aal|um)\s+(\d+)\s+uur\s+(?:per\s+week)?', pdf_text_lower)

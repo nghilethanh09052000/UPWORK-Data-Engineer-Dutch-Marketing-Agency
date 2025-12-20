@@ -85,8 +85,11 @@ class AdeccoScraper(BaseAgencyScraper):
                     response = requests.get(url, headers=headers, timeout=30)
                     response.raise_for_status()
                     soup = parse_html(response.text)
-                    if url not in self.evidence_urls:
+                    # Don't add LOGO_PAGE_URL to evidence_urls (it's just for logo extraction)
+                    if url not in self.evidence_urls and url != self.LOGO_PAGE_URL:
+                        self.logger.info(f"Adding evidence URL: {url}")
                         self.evidence_urls.add(url)
+
                     return soup
                 except Exception as e2:
                     self.logger.warning(f"Fallback fetch failed for {url}: {e2}")
@@ -115,7 +118,7 @@ class AdeccoScraper(BaseAgencyScraper):
             self.logger.warning(f"Error fetching logo page: {e}")
 
         # Scrape all pages and extract data
-        all_text = ""
+        all_text = ""  # Accumulate text for extract_all_common_fields
         for url in self.PAGES_TO_SCRAPE:
             try:
                 soup = self._fetch_page_safe(url)
@@ -123,13 +126,10 @@ class AdeccoScraper(BaseAgencyScraper):
                     continue
                     
                 page_text = soup.get_text(separator=" ", strip=True)
-                all_text += " " + page_text
+                all_text += " " + page_text  # Accumulate for common fields extraction
 
                 # Detect portals on every page
-                if self.utils.detect_candidate_portal(soup, page_text, url):
-                    agency.digital_capabilities.candidate_portal = True
-                if self.utils.detect_client_portal(soup, page_text, url):
-                    agency.digital_capabilities.client_portal = True
+                # Candidate portal detection removed per user request
                 
                 # Extract role levels
                 role_levels = self.utils.fetch_role_levels(page_text, url)
@@ -138,21 +138,24 @@ class AdeccoScraper(BaseAgencyScraper):
                         agency.role_levels = []
                     agency.role_levels.extend(role_levels)
                     agency.role_levels = list(set(agency.role_levels))
+                    self.logger.info(f"✓ Set role_levels: {agency.role_levels} | Source URL: {url}")
                 
                 # Extract review sources
-                review_sources = self.utils.fetch_review_sources(soup, url)
-                if review_sources and not agency.review_sources:
-                    agency.review_sources = review_sources
+                # Review extraction removed per client requirement
+                # Reviews must be explicitly shown/linked on the website, not inferred
 
                 # Extract phone from contact page
                 if "contact" in url.lower():
                     if not agency.contact_phone:
-                        agency.contact_phone = self._extract_phone(soup, page_text)
+                        phone = self._extract_phone(soup, page_text)
+                        if phone:
+                            agency.contact_phone = phone
+                            self.logger.info(f"✓ Set contact_phone: {phone} | Source URL: {url}")
                 
                 # Extract email from any page (main page has ws@adecco.nl in __NEXT_DATA__)
                 if not agency.contact_email:
-                    agency.contact_email = self._extract_email(soup, page_text)
-
+                   # agency.contact_email = self._extract_email(soup, page_text, url)
+                    agency.contact_email = None
                 # Extract KvK, legal name, HQ city/province from privacy page's __NEXT_DATA__
                 if any(p in url.lower() for p in ["privacy", "terms", "policy"]):
                     try:
@@ -162,87 +165,106 @@ class AdeccoScraper(BaseAgencyScraper):
                         
                         if next_data:
                             if not agency.kvk_number:
-                                agency.kvk_number = self._extract_kvk(next_data)
+                                kvk = self._extract_kvk(next_data)
+                                if kvk:
+                                    agency.kvk_number = kvk
+                                    self.logger.info(f"✓ Set kvk_number: {kvk} | Source URL: {url}")
                             if not agency.legal_name:
-                                agency.legal_name = self._extract_legal_name(next_data)
+                                legal_name = self._extract_legal_name(next_data)
+                                if legal_name:
+                                    agency.legal_name = legal_name
+                                    self.logger.info(f"✓ Set legal_name: {legal_name} | Source URL: {url}")
                             if not agency.hq_city or not agency.hq_province:
                                 hq_city, hq_province = self._extract_hq_location(next_data)
                                 if hq_city and not agency.hq_city:
                                     agency.hq_city = hq_city
+                                    self.logger.info(f"✓ Set hq_city: {hq_city} | Source URL: {url}")
                                 if hq_province and not agency.hq_province:
                                     agency.hq_province = hq_province
+                                    self.logger.info(f"✓ Set hq_province: {hq_province} | Source URL: {url}")
                         
                         # Fallback to page_text if __NEXT_DATA__ didn't work
                         if not agency.kvk_number:
-                            agency.kvk_number = self._extract_kvk(page_text)
+                            kvk = self._extract_kvk(page_text)
+                            if kvk:
+                                agency.kvk_number = kvk
+                                self.logger.info(f"✓ Set kvk_number: {kvk} | Source URL: {url}")
                         if not agency.legal_name:
-                            agency.legal_name = self._extract_legal_name(page_text)
+                            legal_name = self._extract_legal_name(page_text)
+                            if legal_name:
+                                agency.legal_name = legal_name
+                                self.logger.info(f"✓ Set legal_name: {legal_name} | Source URL: {url}")
                     except Exception as e:
                         self.logger.warning(f"Error extracting from privacy page: {e}")
                         # Continue with other pages even if this fails
 
-                # Extract towns (office locations) and fields (sectors) from main page
-                if url == "https://www.adecco.nl":
-                    towns = self._extract_towns_from_homepage(soup)
-                    if towns:
-                        # Merge with existing office locations
-                        existing_cities = {loc.city.lower() for loc in (agency.office_locations or [])}
-                        for town in towns:
-                            if town.city.lower() not in existing_cities:
-                                if agency.office_locations is None:
-                                    agency.office_locations = []
-                                agency.office_locations.append(town)
-                                existing_cities.add(town.city.lower())
+                # Extract sectors from homepage only
+                if url == "https://www.adecco.com/nl-nl":
+                    sectors = self._extract_sectors_from_homepage(soup)
+                    if sectors:
+                        agency.sectors_core = sectors
+                        self.logger.info(f"✓ Set sectors_core: {sectors} | Source URL: {url}")
                     
-                    fields = self._extract_fields_from_homepage(soup)
-                    if fields:
-                        # Will be merged with sectors later
-                        if not hasattr(self, '_homepage_sectors'):
-                            self._homepage_sectors = []
-                        self._homepage_sectors.extend(fields)
+                    # Office locations: Set to empty array per client feedback
+                    # Client requirement: "Limit to HQ + 5-10 representative locations OR make this field optional / trimmed"
+                    # For Adecco, we set to empty array to avoid excessive lists
+                    agency.office_locations = []
+                    self.logger.info(f"✓ Set office_locations: [] (empty per client requirement) | Source URL: {url}")
+
+                # Extract services per page
+                page_services = self._extract_services(page_text)
+                if page_services:
+                    # Merge services: if either is True, keep True; otherwise keep None
+                    if not agency.services:
+                        agency.services = page_services
+                        self.logger.info(f"✓ Set services | Source URL: {url}")
+                    else:
+                        # Merge: True takes precedence over None
+                        merged_services = {}
+                        for field in ['uitzenden', 'detacheren', 'werving_selectie', 'payrolling', 
+                                     'zzp_bemiddeling', 'vacaturebemiddeling_only', 'inhouse_services',
+                                     'msp', 'rpo', 'executive_search', 'opleiden_ontwikkelen', 
+                                     'reintegratie_outplacement']:
+                            current = getattr(agency.services, field)
+                            new = getattr(page_services, field)
+                            # True takes precedence, otherwise keep current value
+                            merged_services[field] = True if (current is True or new is True) else current
+                        agency.services = AgencyServices(**merged_services)
+                        self.logger.info(f"✓ Updated services | Source URL: {url}")
+                
+                # Extract focus_segments per page
+                focus_segments = self._extract_focus_segments(page_text)
+                if focus_segments:
+                    if not agency.focus_segments:
+                        agency.focus_segments = []
+                    agency.focus_segments.extend(focus_segments)
+                    agency.focus_segments = list(set(agency.focus_segments))
+                    self.logger.info(f"✓ Set focus_segments: {agency.focus_segments} | Source URL: {url}")
+                
+                # Extract membership per page
+                membership = self._extract_membership(page_text)
+                if membership:
+                    if not agency.membership:
+                        agency.membership = []
+                    agency.membership.extend(membership)
+                    agency.membership = list(set(agency.membership))
+                    self.logger.info(f"✓ Set membership: {agency.membership} | Source URL: {url}")
+                
+                # Extract CAO type per page
+                if not agency.cao_type or agency.cao_type == "onbekend":
+                    cao_type = self._extract_cao_type(page_text)
+                    if cao_type and cao_type != "onbekend":
+                        agency.cao_type = cao_type
+                        self.logger.info(f"✓ Set cao_type: {cao_type} | Source URL: {url}")
 
             except Exception as e:
                 self.logger.warning(f"Error scraping {url}: {e}")
 
-        # Extract all data from accumulated text
-        agency.sectors_core = self._extract_sectors(all_text)
-        
-        # Add normalized sectors
-        normalized_sectors = self.utils.fetch_sectors(all_text, "accumulated_text")
-        if normalized_sectors:
-            existing = set(agency.sectors_core or [])
-            for sector in normalized_sectors:
-                if sector not in existing:
-                    if agency.sectors_core is None:
-                        agency.sectors_core = []
-                    agency.sectors_core.append(sector)
-                    existing.add(sector)
-        
-        # Merge homepage sectors if found
-        if hasattr(self, '_homepage_sectors') and self._homepage_sectors:
-            existing = set(agency.sectors_core or [])
-            for sector in self._homepage_sectors:
-                if sector not in existing:
-                    agency.sectors_core.append(sector)
-                    existing.add(sector)
-        agency.services = self._extract_services(all_text)
-        agency.focus_segments = self._extract_focus_segments(all_text)
         # regions_served will be extracted by extract_all_common_fields using standard format
         
         # Extract certifications from PDF certificate
         agency.certifications = self._fetch_pdf_certifications()
-        
-        agency.membership = self._extract_membership(all_text)
-        agency.cao_type = self._extract_cao_type(all_text)
-        
-        # Extract digital capabilities (mobile app, API, feeds)
-        # Note: Portal detection was already done in the scrape loop above
-        digital_caps = self._extract_digital_capabilities(all_text)
-        agency.digital_capabilities.mobile_app = digital_caps.mobile_app
-        agency.digital_capabilities.api_available = digital_caps.api_available
-        agency.digital_capabilities.realtime_vacancy_feed = digital_caps.realtime_vacancy_feed
-        agency.digital_capabilities.realtime_availability_feed = digital_caps.realtime_availability_feed
-        agency.digital_capabilities.self_service_contracting = digital_caps.self_service_contracting
+    
         
         # HQ city/province may have been extracted from privacy page; fallback to all_text
         if not agency.hq_city or not agency.hq_province:
@@ -258,23 +280,12 @@ class AdeccoScraper(BaseAgencyScraper):
         # ========================================================================
         self.extract_all_common_fields(agency, all_text)
 
-        # Fetch jobs from API for additional data
-        try:
-            jobs_data = self._fetch_jobs_from_api()
-            if jobs_data:
-                self._enrich_from_jobs_data(agency, jobs_data)
-        except Exception as e:
-            self.logger.warning(f"Error fetching jobs API: {e}")
-
-        # Update evidence URLs
+        # Update evidence URLs - use copy (no filtering for Adecco)
         agency.evidence_urls = self.evidence_urls.copy()
         agency.collected_at = self.collected_at
-        agency.services = self.utils.fetch_services(all_text, 'accumulated_text')
 
         self.logger.info(f"Completed scrape of {self.AGENCY_NAME}")
 
-        with open('all_text.txt', 'w') as f:
-            f.write(all_text)
         return agency
 
     def _fetch_jobs_from_api(self) -> dict | None:
@@ -375,176 +386,186 @@ class AdeccoScraper(BaseAgencyScraper):
         
         return None
 
-    def _enrich_from_jobs_data(self, agency: Agency, jobs_data: dict) -> None:
+    def _extract_office_locations_from_footer(self, soup: BeautifulSoup) -> list[OfficeLocation]:
         """
-        Enrich agency data from jobs API response.
+        Extract office locations from footer "VACANCIES BY CITY" section.
         
-        Extracts:
-        - Office locations from job cities
-        - Sectors from job categories
-        - Contract types (uitzenden vs permanent)
-        - Job count statistics
+        HTML structure:
+        <section class="text-inverse footer-col">
+            <div class="small-title">VACANCIES BY CITY</div>
+            <section class="mt2 flex_col">
+                <a href="/nl-nl/vacatures/amsterdam">Amsterdam</a>
+                <a href="/nl-nl/vacatures/arnhem">Arnhem</a>
+                ...
+            </section>
+        </section>
         
-        Parameters
-        ----------
-        agency : Agency
-            Agency object to enrich
-        jobs_data : dict
-            Jobs API response data
-        """
-        jobs = jobs_data.get("jobs", [])
-        facets = jobs_data.get("facets", {})
-        pagination = jobs_data.get("pagination", {})
-        
-        self.logger.info(f"Enriching agency data from {len(jobs)} jobs...")
-        
-        # Extract cities from jobs
-        cities_from_jobs = {}
-        for job in jobs:
-            city = job.get("jobLocation")
-            if city:
-                # Normalize city name (API returns uppercase sometimes)
-                city_normalized = city.title()
-                if city_normalized not in cities_from_jobs:
-                    province = get_province_for_city(city_normalized)
-                    cities_from_jobs[city_normalized] = province
-        
-        # Merge with existing office locations
-        existing_cities = {loc.city.lower() for loc in (agency.office_locations or [])}
-        for city, province in cities_from_jobs.items():
-            if city.lower() not in existing_cities:
-                if agency.office_locations is None:
-                    agency.office_locations = []
-                agency.office_locations.append(OfficeLocation(city=city, province=province))
-                existing_cities.add(city.lower())
-        
-        self.logger.info(f"Added {len(cities_from_jobs)} cities from jobs API")
-        
-        # Extract sectors from facets
-        if facets:
-            category_buckets = facets.get("category", {}).get("buckets", [])
-            sectors_from_api = []
-            
-            # Map API category IDs to our standardized sector names
-            api_category_map = {
-                "Transport en logistiek": "logistiek",
-                "Productie": "productie",
-                "Techniek": "techniek",
-                "Administratief": "administratief",
-                "Commercieel en marketing": "sales",
-                "Horeca": "horeca",
-                "Personeel en organisatie": "hr",
-                "Secretarieel": "secretarieel",
-                "Callcenter": "callcenter",
-                "Detailhandel": "retail",
-                "Financieel": "finance",
-                "Medisch": "zorg",
-                "Bank en verzekeringen": "verzekeringen",
-                "IT": "ict",
-                "Juridisch": "juridisch",
-            }
-            
-            for bucket in category_buckets:
-                val = bucket.get("val", "")
-                count = bucket.get("count", 0)
-                # Format: "ADCNLCAT011|Transport en logistiek"
-                if "|" in val:
-                    category_name = val.split("|")[1].strip()
-                    if category_name in api_category_map and count > 0:
-                        sector = api_category_map[category_name]
-                        if sector not in sectors_from_api:
-                            sectors_from_api.append(sector)
-                            self.logger.info(f"Found sector from API: {category_name} ({count} jobs) -> {sector}")
-            
-            # Merge with existing sectors
-            if sectors_from_api:
-                existing_sectors = set(agency.sectors_core or [])
-                for sector in sectors_from_api:
-                    if sector not in existing_sectors:
-                        if agency.sectors_core is None:
-                            agency.sectors_core = []
-                        agency.sectors_core.append(sector)
-                        existing_sectors.add(sector)
-        
-        # Extract contract type info (services)
-        temp_count = 0
-        perm_count = 0
-        for job in jobs:
-            contract_type = job.get("contractTypeId")
-            if contract_type == "TEMP":
-                temp_count += 1
-            elif contract_type == "PERM":
-                perm_count += 1
-        
-        # Update services based on contract types found
-        if temp_count > 0:
-            agency.services.uitzenden = True
-            self.logger.info(f"Found {temp_count} temporary (uitzenden) jobs")
-        if perm_count > 0:
-            agency.services.werving_selectie = True
-            self.logger.info(f"Found {perm_count} permanent (werving & selectie) jobs")
-        
-        # Note: We don't extract the following from API as they're job-specific, not agency policies:
-        # - avg_hourly_rate: API salary is worker wages, not agency rates
-        # - annual_placements_estimate: Active jobs ≠ annual placements
-        # - min_hours_per_week: Job-specific workMinHours, not agency minimum
-        # - role_levels: exeprienceLevel is usually null, educationLevel ≠ role level
-        # - shift_types_supported: Unreliable to parse from job titles
-
-    def _extract_towns_from_homepage(self, soup: BeautifulSoup) -> list[OfficeLocation]:
-        """
-        Extract towns (office locations) from the homepage.
-        
-        The homepage has /vacatures/{city} links for cities where Adecco operates.
-        Uses shared CITY_SLUGS and get_province_for_city from lib/dutch.py.
+        Returns
+        -------
+        list[OfficeLocation]
+            List of office locations extracted from footer
         """
         locations = []
         seen_cities = set()
         
-        # Find all /vacatures/ links
-        links = soup.find_all("a", href=re.compile(r"/vacatures/"))
+        # Find footer section with "VACANCIES BY CITY" title
+        footer_sections = soup.find_all("section", class_=lambda x: x and "footer-col" in x)
         
-        for link in links:
-            href = link.get("href", "")
-            slug_match = re.search(r"/vacatures/([^/]+)/?$", href)
-            if slug_match:
+        for section in footer_sections:
+            # Check if this section has "VACANCIES BY CITY" title
+            title_div = section.find("div", class_=lambda x: x and "small-title" in x if x else False)
+            if not title_div:
+                continue
+            
+            title_text = title_div.get_text(strip=True).upper()
+            if "VACANCIES BY CITY" not in title_text and "VACATURES PER STAD" not in title_text:
+                continue
+            
+            # Find the nested section with city links
+            city_section = section.find("section", class_=lambda x: x and "mt2" in x and "flex_col" in x if x else False)
+            if not city_section:
+                continue
+            
+            # Extract all city links
+            city_links = city_section.find_all("a", href=re.compile(r"/nl-nl/vacatures/"))
+            
+            self.logger.info(f"   Found {len(city_links)} city links in footer 'VACANCIES BY CITY' section")
+            
+            for link in city_links:
+                href = link.get("href", "")
+                city_name = link.get_text(strip=True)
+                
+                # Skip "All vacancies" link
+                if not city_name or city_name.lower() in ["all vacancies", "alle vacatures"]:
+                    continue
+                
+                # Extract city slug from href for validation
+                slug_match = re.search(r"/vacatures/([^/]+)/?$", href)
+                if not slug_match:
+                    continue
+                
                 slug = slug_match.group(1).lower()
+                
                 # Use shared utility to check if this is a city slug
-                if is_city_slug(slug) and slug not in seen_cities:
-                    # Convert slug to proper name
-                    city_name = link.get_text(strip=True) or slug.replace("-", " ").title()
+                if is_city_slug(slug) and city_name not in seen_cities:
                     # Use shared utility to get province
                     province = get_province_for_city(city_name)
                     location = OfficeLocation(city=city_name, province=province)
                     locations.append(location)
-                    seen_cities.add(slug)
-                    self.logger.info(f"Found town from homepage: {city_name}, {province}")
+                    seen_cities.add(city_name)
+                    self.logger.info(f"✓ Found office location from footer: {city_name}, {province}")
+        
+        if locations:
+            self.logger.info(f"✅ Extracted {len(locations)} office locations from footer: {[loc.city for loc in locations]}")
         
         return locations
 
-    def _extract_fields_from_homepage(self, soup: BeautifulSoup) -> list[str]:
+    def _extract_sectors_from_homepage(self, soup: BeautifulSoup) -> list[str]:
         """
-        Extract fields (sectors) from the homepage.
+        Extract main sectors from the homepage section.
         
-        The homepage has /vacatures/{sector} links for sectors.
-        Uses shared SECTOR_SLUG_TO_NAME from lib/dutch.py.
+        HTML structure:
+        <section class="mt2 flex_col">
+            <a href="/nl-nl/vacatures/administratief">Administratief</a>
+            <a href="/nl-nl/vacatures/callcenter">Callcenter</a>
+            <a href="/nl-nl/vacatures/commercieel-en-marketing">Commercieel </a>
+            ...
+        </section>
         """
         sectors = []
+        seen = set()
         
-        # Find all /vacatures/ links
-        links = soup.find_all("a", href=re.compile(r"/vacatures/"))
+        # Known sector slugs (not cities)
+        known_sector_slugs = {
+            "administratief", "callcenter", "commercieel-en-marketing", "financieel",
+            "horeca", "personeel-en-organisatie", "it", "juridisch",
+            "transport-en-logistiek", "medisch", "productie", "secretarieel",
+            "techniek", "verzekeringen"
+        }
+        
+        # Map Adecco's sector slugs to standardized names (simple direct mapping)
+        sector_mapping = {
+            "administratief": "administratief",
+            "callcenter": "callcenter",
+            "commercieel-en-marketing": "sales",
+            "financieel": "finance",
+            "horeca": "horeca",
+            "personeel-en-organisatie": "hr",
+            "it": "ict",
+            "juridisch": "juridisch",
+            "transport-en-logistiek": "logistiek",
+            "medisch": "zorg",
+            "productie": "productie",
+            "secretarieel": "secretarieel",
+            "techniek": "techniek",
+            "verzekeringen": "verzekeringen",
+        }
+        
+        # Find all sections with class "mt2 flex_col"
+        # Handle both string and list class formats
+        def has_classes(classes):
+            if not classes:
+                return False
+            # Convert to list if it's a string
+            if isinstance(classes, str):
+                classes = classes.split()
+            # Check if both classes are present
+            return "mt2" in classes and "flex_col" in classes
+        
+        all_sections = soup.find_all("section", class_=has_classes)
+        
+        # Find the section that contains sector links (not city links)
+        sector_section = None
+        for section in all_sections:
+            links = section.find_all("a", href=re.compile(r"/nl-nl/vacatures/"))
+            # Check if this section has sector links (not city links)
+            sector_count = 0
+            for link in links:
+                href = link.get("href", "").lower()
+                href_match = re.search(r"/vacatures/([^/]+)", href)
+                if href_match:
+                    slug = href_match.group(1).lower()
+                    if slug in known_sector_slugs:
+                        sector_count += 1
+            
+            # If at least 5 sector links found, this is the sector section
+            if sector_count >= 5:
+                sector_section = section
+                self.logger.info(f"   Found sector section with {sector_count} sector links")
+                break
+        
+        if not sector_section:
+            self.logger.warning("⚠ Could not find sector section | Source: homepage")
+            return sectors
+        
+        # Find all <a> tags with href containing /nl-nl/vacatures/
+        links = sector_section.find_all("a", href=re.compile(r"/nl-nl/vacatures/"))
+        
+        self.logger.info(f"   Found {len(links)} links in sector section")
         
         for link in links:
-            href = link.get("href", "")
-            slug_match = re.search(r"/vacatures/([^/]+)/?$", href)
-            if slug_match:
-                slug = slug_match.group(1).lower()
-                # Use shared utility to normalize sector slug
-                sector = normalize_sector_slug(slug)
-                if sector and sector not in sectors:
-                    sectors.append(sector)
-                    self.logger.info(f"Found field from homepage: {slug} -> {sector}")
+            href = link.get("href", "").lower()
+            
+            # Skip "Alle vacatures" link
+            if href == "/nl-nl/vacatures" or href == "/nl-nl/vacatures/":
+                continue
+            
+            # Extract sector from href
+            href_match = re.search(r"/vacatures/([^/]+)", href)
+            if not href_match:
+                continue
+            
+            sector_slug = href_match.group(1).lower()
+            
+            # Only extract if it's a known sector (not a city)
+            if sector_slug in sector_mapping:
+                standard_sector = sector_mapping[sector_slug]
+                if standard_sector not in seen:
+                    sectors.append(standard_sector)
+                    seen.add(standard_sector)
+                    self.logger.info(f"✓ Found sector: {sector_slug} → {standard_sector} | Source: homepage")
         
+        self.logger.info(f"✅ Extracted {len(sectors)} sectors from homepage: {sectors}")
         return sectors
 
     def _extract_logo(self, soup: BeautifulSoup) -> str | None:
@@ -582,7 +603,7 @@ class AdeccoScraper(BaseAgencyScraper):
         
         return None
 
-    def _extract_email(self, soup: BeautifulSoup, text: str) -> str | None:
+    def _extract_email(self, soup: BeautifulSoup, text: str, url) -> str | None:
         """
         Extract email - from mailto links or text.
         
@@ -596,7 +617,7 @@ class AdeccoScraper(BaseAgencyScraper):
         mailto_match = re.search(r'mailto:([a-zA-Z0-9._%+-]+@adecco\.nl)', raw_html, re.IGNORECASE)
         if mailto_match:
             email = mailto_match.group(1)
-            self.logger.info(f"Found email via mailto: {email}")
+            self.logger.info(f"Found email via mailto: {email} on url {url}")
             return email
         
         # Fallback: Look for adecco emails in text
@@ -609,7 +630,7 @@ class AdeccoScraper(BaseAgencyScraper):
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 email = match.group(1)
-                self.logger.info(f"Found email: {email}")
+                self.logger.info(f"Found email: {email} on url {url}")
                 return email
         
         return None
@@ -707,59 +728,6 @@ class AdeccoScraper(BaseAgencyScraper):
         
         return None
 
-    def _extract_sectors(self, text: str) -> list[str]:
-        """
-        Extract sectors from Adecco's vakgebied section.
-        
-        Adecco's footer lists these vakgebieden:
-        Administratief, Callcenter, Commercieel, Financieel, Horeca, HR, IT,
-        Juridisch, Logistiek, Medisch, Productie, Secretarieel, Techniek, Verzekeringen
-        """
-        sectors = []
-        text_lower = text.lower()
-
-        # Map Adecco's vakgebieden to standardized sector names
-        # Only include if explicitly mentioned in context of services/vakgebied
-        adecco_vakgebieden = {
-            "administratief": "administratief",
-            "callcenter": "callcenter", 
-            "commercieel": "sales",
-            "financieel": "finance",
-            "horeca": "horeca",
-            "hr": "hr",
-            "it": "ict",
-            "juridisch": "juridisch",
-            "logistiek": "logistiek",
-            "medisch": "zorg",
-            "productie": "productie",
-            "secretarieel": "secretarieel",
-            "techniek": "techniek",
-            "verzekeringen": "verzekeringen",
-        }
-
-        # Check for VAKGEBIED section which lists their actual sectors
-        import re
-        vakgebied_match = re.search(r'VAKGEBIED(.{0,600})', text, re.IGNORECASE | re.DOTALL)
-        if vakgebied_match:
-            self.logger.info("✓ Found VAKGEBIED section in text")
-            vakgebied_text = vakgebied_match.group(1).lower()
-            for adecco_term, standard_sector in adecco_vakgebieden.items():
-                if adecco_term in vakgebied_text:
-                    sectors.append(standard_sector)
-                    self.logger.info(f"  → Found sector from VAKGEBIED: {adecco_term} → {standard_sector}")
-        
-        # If VAKGEBIED not found, fall back to broader matching
-        if not sectors:
-            self.logger.info("VAKGEBIED not found, using broader text matching")
-            for adecco_term, standard_sector in adecco_vakgebieden.items():
-                if adecco_term in text_lower:
-                    sectors.append(standard_sector)
-                    self.logger.info(f"  → Found sector (broad match): {adecco_term} → {standard_sector}")
-
-        unique_sectors = list(set(sectors))
-        self.logger.info(f"Total unique sectors found: {len(unique_sectors)}")
-        return unique_sectors
-
     def _extract_services(self, text: str) -> AgencyServices:
         """
         Extract services offered by Adecco.
@@ -800,17 +768,20 @@ class AdeccoScraper(BaseAgencyScraper):
         if inhouse_services:
             self.logger.info("✓ Found service: inhouse_services")
         
-        msp = any(w in diensten_context for w in ["managed service provider", "msp diensten"])
+        # MSP - Require explicit confirmation in services context
+        msp = any(w in diensten_context for w in ["managed service provider", "msp", "msp diensten"])
         if msp:
-            self.logger.info("✓ Found service: msp")
+            self.logger.info("✓ Found service: msp (explicit confirmation in services context)")
         
-        rpo = any(w in diensten_context for w in ["recruitment process outsourcing", "rpo diensten"])
+        # RPO - Require explicit confirmation in services context
+        rpo = any(w in diensten_context for w in ["recruitment process outsourcing", "rpo", "rpo diensten"])
         if rpo:
-            self.logger.info("✓ Found service: rpo")
+            self.logger.info("✓ Found service: rpo (explicit confirmation in services context)")
         
-        executive_search = "executive search" in diensten_context
+        # Executive Search - Require explicit confirmation in services context
+        executive_search = "executive search" in diensten_context or "executive recruitment" in diensten_context
         if executive_search:
-            self.logger.info("✓ Found service: executive_search")
+            self.logger.info("✓ Found service: executive_search (explicit confirmation in services context)")
         
         # Training/development
         opleiden_ontwikkelen = any(w in text_lower for w in ["opleiden en ontwikkelen", "training en ontwikkeling", "adecco academy"])
@@ -827,7 +798,7 @@ class AdeccoScraper(BaseAgencyScraper):
             werving_selectie=werving_selectie,
             payrolling=payrolling,
             zzp_bemiddeling=zzp_bemiddeling,
-            vacaturebemiddeling_only=False,
+            vacaturebemiddeling_only=None,  # Unknown unless explicitly stated
             inhouse_services=inhouse_services,
             msp=msp,
             rpo=rpo,
@@ -900,9 +871,10 @@ class AdeccoScraper(BaseAgencyScraper):
                         "groningen", "arnhem", "den bosch", "tilburg", "zwolle"]
         cities_found = sum(1 for city in dutch_cities if city in text_lower)
         
-        if cities_found >= 3 or "heel nederland" in text_lower or "landelijk" in text_lower:
+        # Only set "landelijk" if explicitly stated in text - no assumption from city count
+        if "heel nederland" in text_lower or "landelijk" in text_lower:
             regions.append("landelijk")
-            self.logger.info(f"✓ Found region: landelijk (found {cities_found} Dutch cities)")
+            self.logger.info(f"✓ Found region: landelijk (explicitly stated in text)")
         
         # Adecco Group is international
         if any(w in text_lower for w in ["adecco group", "worldwide", "global", "landen"]):
@@ -1022,7 +994,8 @@ class AdeccoScraper(BaseAgencyScraper):
         """
         Extract digital capabilities (mobile app, API, feeds).
         
-        Portal detection is handled in the main scrape() loop.
+        Client portal detection is handled in the main scrape() loop.
+        Candidate portal detection removed per user request.
         """
         text_lower = text.lower()
         
@@ -1030,13 +1003,13 @@ class AdeccoScraper(BaseAgencyScraper):
         has_app = any(w in text_lower for w in ["app store", "google play", "download app", "adecco app"])
         
         return DigitalCapabilities(
-            client_portal=False,
-            candidate_portal=False,
-            mobile_app=has_app,
-            api_available=True,  # ✓ Adecco has Jobs API: https://www.adecco.com/api/data/jobs/summarized
-            realtime_vacancy_feed=True,  # Jobs API provides real-time vacancy data
-            realtime_availability_feed=False,
-            self_service_contracting=False,
+            client_portal=None,  # Set separately in scrape() loop when detected
+            candidate_portal=None,  # Removed per user request - not detected for Adecco
+            mobile_app=has_app if has_app else None,  # Only set if explicitly found
+            api_available=None,  # Only set to True if explicitly stated on website
+            realtime_vacancy_feed=None,  # Only set to True if explicitly stated on website
+            realtime_availability_feed=None,
+            self_service_contracting=None,
         )
 
     def _extract_hq_city(self, text: str) -> str | None:
@@ -1101,28 +1074,66 @@ class AdeccoScraper(BaseAgencyScraper):
         city = extract_hq_city_from_text(text)
         return city, None
 
-    def _extract_office_locations(self, text: str) -> list[OfficeLocation]:
-        """
-        Extract office locations from privacy policy.
-        
-        Uses the shared extract_office_locations utility from lib/extract.py
-        which handles Dutch postal code to province mapping.
-        """
-        # Use shared utility
-        location_dicts = extract_office_locations(text)
-        
-        locations = []
-        for loc in location_dicts:
-            location = OfficeLocation(city=loc["city"], province=loc.get("province"))
-            locations.append(location)
-            self.logger.info(f"Found office location: {loc['city']}, {loc.get('province')}")
-        
-        return locations
-
     def _make_absolute_url(self, url: str, base_url: str = "") -> str:
         """Convert relative URL to absolute using shared utility."""
         base = base_url if base_url else self.WEBSITE_URL
         return make_absolute_url(url, base)
+    
+    def _filter_adecco_evidence_urls(self) -> list[str]:
+        """
+        Filter evidence URLs to exclude specific URLs and domains that shouldn't be included.
+        
+        Excludes:
+        - Entire adecco-jobs.com domain (jobs/API domain, not employer-facing)
+        - LOGO_PAGE_URL (adecco-jobs.com/amazon/en-nl/contact/) - only used for logo extraction
+        - Privacy policy page (policy/english/privacy-policy) - technical/legal page
+        - API endpoints (JOBS_API_URL)
+        - PDF URLs (MVO_CERTIFICATE_URL) - technical endpoints
+        
+        Returns
+        -------
+        list[str]
+            Filtered list of evidence URLs
+        """
+        from urllib.parse import urlparse
+        
+        # URLs to exclude
+        exclude_urls = {
+            self.LOGO_PAGE_URL,
+        }
+        
+        # Domains to exclude
+        exclude_domains = {
+            "adecco-jobs.com",
+            "www.adecco-jobs.com",
+        }
+        
+        # Remove specific URLs and domains that shouldn't be included
+        filtered = []
+        for url in self.evidence_urls:
+            # Check if URL is in exclude list
+            if url in exclude_urls:
+                continue
+            
+            # Check if URL is from excluded domain
+            try:
+                parsed = urlparse(url)
+                if parsed.netloc.lower() in exclude_domains:
+                    continue
+            except Exception:
+                # If URL parsing fails, keep it (might be relative or malformed)
+                pass
+            
+            filtered.append(url)
+        
+        excluded_count = len(self.evidence_urls) - len(filtered)
+        if excluded_count > 0:
+            self.logger.info(
+                f"✓ Filtered out {excluded_count} excluded URLs/domains (adecco-jobs.com domain, logo page, privacy policy, API, PDF) | "
+                f"Final count: {len(filtered)}"
+            )
+        
+        return filtered
 
 
 @dg.asset(group_name="agencies")

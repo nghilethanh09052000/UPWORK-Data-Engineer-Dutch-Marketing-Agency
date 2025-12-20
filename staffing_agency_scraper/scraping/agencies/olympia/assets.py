@@ -35,19 +35,9 @@ class OlympiaScraper(BaseAgencyScraper):
             "functions": ['certifications'],  # Comprehensive list of all certifications
         },
         {
-            "name": "uitzenden",
-            "url": "https://www.olympia.nl/personeel/uitzenden/",
-            "functions": ['use_cases', 'value_props'],  # Extract typical use cases and value propositions
-        },
-        {
-            "name": "mkb",
-            "url": "https://www.olympia.nl/personeel/mkb/",
-            "functions": ['smb_stats'],  # Extract SMB-specific statistics and growth signals
-        },
-        {
-            "name": "werving_selectie",
-            "url": "https://www.olympia.nl/personeel/werving-en-selectie/",
-            "functions": ['recruitment_pricing'],  # Extract no cure no pay, pricing model, growth signals
+            "name": "personeel",
+            "url": "https://www.olympia.nl/personeel/",
+            "functions": ['services'],  # Extract services from accordion
         },
         {
             "name": "vestigingen",
@@ -72,8 +62,8 @@ class OlympiaScraper(BaseAgencyScraper):
         # Initialize utils
         self.utils = AgencyScraperUtils(logger=self.logger)
         agency = self.create_base_agency()
-        agency.geo_focus_type = GeoFocusType.NATIONAL
-        agency.employers_page_url = f"{self.WEBSITE_URL}/personeel"
+        # agency.geo_focus_type = GeoFocusType.NATIONAL
+        agency.employers_page_url = None
         
         all_sectors: Set[str] = set()
         page_texts: Dict[str, str] = {}
@@ -94,18 +84,20 @@ class OlympiaScraper(BaseAgencyScraper):
                 # Apply normal functions
                 self._apply_functions(agency, functions, soup, page_text, all_sectors, url)
                 
-                # Portal detection on every page
-                if self.utils.detect_candidate_portal(soup, page_text, url):
-                    agency.digital_capabilities.candidate_portal = True
-                if self.utils.detect_client_portal(soup, page_text, url):
-                    agency.digital_capabilities.client_portal = True
-                
-                     
+        
             except Exception as e:
                 self.logger.error(f"❌ Error scraping {url}: {e}")
         
         # Extract common fields using utils
-        agency.certifications = self.utils.fetch_certifications(page_texts)
+        # Only fetch certifications from utils if not already extracted manually
+        if not agency.certifications:
+            agency.certifications = self.utils.fetch_certifications(page_texts)
+        else:
+            # Merge with any additional certifications found by utils
+            utils_certs = self.utils.fetch_certifications(page_texts)
+            for cert in utils_certs:
+                if cert not in agency.certifications:
+                    agency.certifications.append(cert)
         agency.cao_type = self.utils.fetch_cao_type(page_texts)
         agency.membership = self.utils.fetch_membership(page_texts)
         
@@ -113,7 +105,8 @@ class OlympiaScraper(BaseAgencyScraper):
         if all_sectors:
             agency.sectors_core = sorted(list(all_sectors))
         
-        agency.evidence_urls = list(self.evidence_urls)
+        agency.evidence_urls = self.evidence_urls.copy()
+        # agency.evidence_urls = self.get_filtered_evidence_urls()
         agency.collected_at = self.collected_at
 
         # ========================================================================
@@ -122,9 +115,9 @@ class OlympiaScraper(BaseAgencyScraper):
         # ========================================================================
         self.extract_all_common_fields(agency, all_text)
 
-        with open('all_text.txt', 'w') as f:    
+
+        with open('all_text.txt', 'w') as f:
             f.write(all_text)
-        
         
         self.logger.info(f"✅ Completed scrape of {self.AGENCY_NAME}")
         
@@ -174,14 +167,14 @@ class OlympiaScraper(BaseAgencyScraper):
             elif func_name == "sectors_home":
                 self._extract_sectors_from_home(soup, all_sectors, url)
             
-            elif func_name == "sectors_footer":
-                self._extract_sectors_from_footer(soup, all_sectors, url)
-            
             elif func_name == "smb_stats":
                 self._extract_smb_statistics(soup, agency, url)
             
             elif func_name == "recruitment_pricing":
                 self._extract_recruitment_pricing(soup, agency, url)
+            
+            elif func_name == "services":
+                self._extract_services_from_personnel(soup, agency, url)
             
             elif func_name == "offices_paginated":
                 offices = self._extract_offices_paginated(url)
@@ -249,18 +242,10 @@ class OlympiaScraper(BaseAgencyScraper):
             # Regex to extract ...@olympia.nl
             email_match = re.search(r'([a-z0-9]+@olympia\.nl)', href, re.IGNORECASE)
             if email_match:
-                agency.contact_email = email_match.group(1).lower()
+                # agency.contact_email = email_match.group(1).lower()
+                agency.contact_email = None
                 self.logger.info(f"✓ Found contact email: {agency.contact_email} | Source: {url}")
                 break
-        
-        # Extract phone: T 023 - 583 70 00
-        if not agency.contact_phone:
-            text = soup.get_text(separator=" ", strip=True)
-            phone_match = re.search(r'T\s*(023\s*-?\s*583\s*70\s*00)', text)
-            if phone_match:
-                phone = phone_match.group(1).replace(" ", "").replace("-", "")
-                agency.contact_phone = f"023-{phone[3:]}"
-                self.logger.info(f"✓ Found contact phone: {agency.contact_phone} | Source: {url}")
         
         # Extract legal name: Olympia Nederland B.V.
         if not agency.legal_name:
@@ -312,15 +297,7 @@ class OlympiaScraper(BaseAgencyScraper):
             if "vakschool" in link_text:
                 agency.services.opleiden_ontwikkelen = True
                 self.logger.info(f"✓ Found service: opleiden_ontwikkelen (Vakschool training) | Source: {url}")
-            
-            # MKB (SMB focus)
-            if "mkb" in link_text:
-                if not agency.customer_segments:
-                    agency.customer_segments = []
-                if "SMB" not in agency.customer_segments:
-                    agency.customer_segments.append("SMB")
-                    self.logger.info(f"✓ Found customer segment: SMB (MKB specialization) | Source: {url}")
-        
+              
         # Check for CAO 2026 banner
         cao_link = header.find("a", href=lambda x: x and "cao" in x.lower())
         if cao_link:
@@ -339,6 +316,57 @@ class OlympiaScraper(BaseAgencyScraper):
                     agency.growth_signals = []
                 if "meertalig_platform" not in agency.growth_signals:
                     agency.growth_signals.append("meertalig_platform")
+    
+    def _extract_services_from_personnel(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
+        """
+        Extract services from the personnel page accordion.
+        
+        The accordion structure contains:
+        - "Broadcasting" (Uitzenden) → uitzenden
+        - "Recruitment and selection" (Werving en selectie) → werving_selectie
+        - "In-house" (Inhouse) → inhouse_services
+        - "Vocational school" (Vakschool) → opleiden_ontwikkelen
+        """
+        # Find the accordion container
+        accordion = soup.find("div", class_="accordion")
+        if not accordion:
+            self.logger.warning(f"⚠ No accordion found on personnel page | Source: {url}")
+            return
+        
+        # Find all accordion items
+        accordion_items = accordion.find_all("div", class_="accordion-item")
+        if not accordion_items:
+            self.logger.warning(f"⚠ No accordion items found | Source: {url}")
+            return
+        
+        for item in accordion_items:
+            # Find the header with service name
+            header = item.find("div", class_="accordion-header")
+            if not header:
+                continue
+            
+            h5 = header.find("h5")
+            if not h5:
+                continue
+            
+            service_name = h5.get_text(strip=True).lower()
+            
+            # Map service names to agency services
+            if "broadcasting" in service_name or "uitzenden" in service_name:
+                agency.services.uitzenden = True
+                self.logger.info(f"✓ Found service: uitzenden (from accordion: '{h5.get_text(strip=True)}') | Source: {url}")
+            
+            elif "recruitment" in service_name and "selection" in service_name:
+                agency.services.werving_selectie = True
+                self.logger.info(f"✓ Found service: werving_selectie (from accordion: '{h5.get_text(strip=True)}') | Source: {url}")
+            
+            elif "in-house" in service_name or "inhouse" in service_name:
+                agency.services.inhouse_services = True
+                self.logger.info(f"✓ Found service: inhouse_services (from accordion: '{h5.get_text(strip=True)}') | Source: {url}")
+            
+            elif "vocational school" in service_name or "vakschool" in service_name:
+                agency.services.opleiden_ontwikkelen = True
+                self.logger.info(f"✓ Found service: opleiden_ontwikkelen (from accordion: '{h5.get_text(strip=True)}') | Source: {url}")
     
     def _extract_certifications(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
         """
@@ -414,12 +442,17 @@ class OlympiaScraper(BaseAgencyScraper):
         
         # Merge certifications
         if certs:
+            from staffing_agency_scraper.lib.normalize import normalize_certifications
             if not agency.certifications:
                 agency.certifications = []
-            for cert in certs:
+            # Normalize before merging
+            normalized_certs = normalize_certifications(certs)
+            for cert in normalized_certs:
                 if cert not in agency.certifications:
                     agency.certifications.append(cert)
-            self.logger.info(f"✓ Found {len(certs)} certifications: {', '.join(certs)} | Source: {url}")
+            # Normalize the final list
+            agency.certifications = normalize_certifications(agency.certifications)
+            self.logger.info(f"✓ Found {len(normalized_certs)} certifications: {', '.join(normalized_certs)} | Source: {url}")
         
         # Log awards as growth signals
         if awards:
@@ -540,44 +573,45 @@ class OlympiaScraper(BaseAgencyScraper):
         page_text = soup.get_text(separator=" ", strip=True).lower()
         
         # Extract candidate pool size: "20,000 employees"
+        # Extract candidate pool size - only if explicitly stated (no threshold assumptions)
         pool_match = re.search(r'(\d+[.,]?\d*)\s*(?:medewerkers|employees|candidates)(?:\s+beschikbaar|available)?', page_text)
         if pool_match:
             pool_size = int(pool_match.group(1).replace(".", "").replace(",", ""))
-            if pool_size >= 10000:  # Only if significant
-                agency.candidate_pool_size_estimate = pool_size
-                self.logger.info(f"✓ Found candidate pool size: {pool_size:,} | Source: {url}")
+            # Only extract if explicitly stated - no threshold filtering
+            agency.candidate_pool_size_estimate = pool_size
+            self.logger.info(f"✓ Found candidate pool size: {pool_size:,} (explicitly stated) | Source: {url}")
         
-        # Extract annual placements: "20,000 candidates per year"
+        # Extract annual placements - only if explicitly stated (no threshold assumptions)
         placement_match = re.search(r'(\d+[.,]?\d*)\s*(?:kandidaten|candidates).*?(?:per jaar|every year|jaarlijks)', page_text)
         if placement_match:
             placements = int(placement_match.group(1).replace(".", "").replace(",", ""))
-            if placements >= 5000:  # Only if significant
-                agency.annual_placements_estimate = placements
-                self.logger.info(f"✓ Found annual placements: {placements:,} | Source: {url}")
+            # Only extract if explicitly stated - no threshold filtering
+            agency.annual_placements_estimate = placements
+            self.logger.info(f"✓ Found annual placements: {placements:,} (explicitly stated) | Source: {url}")
         
-        # Extract number of SME clients: "3,000 SME clients"
+        # Extract number of SME clients - only if explicitly stated (no threshold assumptions)
         client_match = re.search(r'(\d+[.,]?\d*)\s*(?:mkb[- ]?klanten|mkb[- ]?bedrijven|sme clients)', page_text)
         if client_match:
             client_count = int(client_match.group(1).replace(".", "").replace(",", ""))
-            if client_count >= 1000:  # Significant client base
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                signal = f"{client_count}_mkb_klanten"
-                if signal not in agency.growth_signals:
-                    agency.growth_signals.append(signal)
-                self.logger.info(f"✓ Found client base: {client_count:,} SME clients | Source: {url}")
+            # Only extract if explicitly stated - no threshold filtering
+            if not agency.growth_signals:
+                agency.growth_signals = []
+            signal = f"{client_count}_mkb_klanten"
+            if signal not in agency.growth_signals:
+                agency.growth_signals.append(signal)
+            self.logger.info(f"✓ Found client base: {client_count:,} SME clients (explicitly stated) | Source: {url}")
         
-        # Extract years of experience: "50 years"
+        # Extract years of experience - only if explicitly stated (no threshold assumptions)
         years_match = re.search(r'(\d+)\s*(?:jaar|years)(?:\s+ervaring|experience)?', page_text)
         if years_match:
             years = int(years_match.group(1))
-            if years >= 20:  # Significant history
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                signal = f"{years}_jaar_actief"
-                if signal not in agency.growth_signals:
-                    agency.growth_signals.append(signal)
-                self.logger.info(f"✓ Found company history: {years} years active | Source: {url}")
+            # Only extract if explicitly stated - no threshold filtering
+            if not agency.growth_signals:
+                agency.growth_signals = []
+            signal = f"{years}_jaar_actief"
+            if signal not in agency.growth_signals:
+                agency.growth_signals.append(signal)
+            self.logger.info(f"✓ Found company history: {years} years active (explicitly stated) | Source: {url}")
         
         # Extract "Municipal government" sector mention
         if "gemeenten" in page_text or "municipal" in page_text or "overheid" in page_text:
@@ -609,17 +643,17 @@ class OlympiaScraper(BaseAgencyScraper):
                 agency.example_pricing_hint = "Percentage of annual salary (varies by complexity and seniority)"
             self.logger.info(f"✓ Found pricing model: percentage of annual salary | Source: {url}")
         
-        # Extract number of branches: "130 vestigingen"
+        # Extract number of branches - only if explicitly stated (no threshold assumptions)
         branch_match = re.search(r'(\d+)\s*(?:vestigingen|kantoren|branches)', page_text)
         if branch_match:
             branch_count = int(branch_match.group(1))
-            if branch_count >= 50:  # Significant network
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                signal = f"landelijk_{branch_count}_vestigingen"
-                if signal not in agency.growth_signals:
-                    agency.growth_signals.append(signal)
-                self.logger.info(f"✓ Found national network: {branch_count} branches | Source: {url}")
+            # Only extract if explicitly stated - no threshold filtering
+            if not agency.growth_signals:
+                agency.growth_signals = []
+            signal = f"landelijk_{branch_count}_vestigingen"
+            if signal not in agency.growth_signals:
+                agency.growth_signals.append(signal)
+            self.logger.info(f"✓ Found national network: {branch_count} branches (explicitly stated) | Source: {url}")
         
         # Extract value propositions
         value_props = []
@@ -700,14 +734,16 @@ class OlympiaScraper(BaseAgencyScraper):
                         if not agency.growth_signals:
                             agency.growth_signals = []
                         
-                        # Check for Fortune 500 / enterprise clients
+                        # Check for Fortune 500 / enterprise clients - only if explicitly listed
+                        # Removed threshold assumption (>= 3) - only extract if explicitly stated
                         enterprise_clients = ["DHL", "ASML", "Gemeente Amsterdam", "GVB", "Kruidvat", "Renewi"]
                         major_count = sum(1 for client in clients if any(ec.lower() in client.lower() for ec in enterprise_clients))
                         
-                        if major_count >= 3:
+                        # Only add if clients are explicitly listed (no threshold filtering)
+                        if major_count > 0:
                             if "werkt_met_fortune500_klanten" not in agency.growth_signals:
                                 agency.growth_signals.append("werkt_met_fortune500_klanten")
-                            self.logger.info(f"✓ Found {len(clients)} major client references: {', '.join(clients[:3])}... | Source: {url}")
+                            self.logger.info(f"✓ Found {len(clients)} major client references: {', '.join(clients[:3])}... (explicitly listed) | Source: {url}")
                     break
         
         # Extract certifications from footer images
@@ -725,11 +761,15 @@ class OlympiaScraper(BaseAgencyScraper):
                 certs.append("NFV")
         
         if certs:
+            from staffing_agency_scraper.lib.normalize import normalize_certifications
             if not agency.certifications:
                 agency.certifications = []
-            agency.certifications.extend(certs)
-            agency.certifications = list(set(agency.certifications))
-            self.logger.info(f"✓ Found certifications: {', '.join(certs)} | Source: {url}")
+            # Normalize before merging
+            normalized_certs = normalize_certifications(certs)
+            agency.certifications.extend(normalized_certs)
+            # Normalize the final list
+            agency.certifications = normalize_certifications(agency.certifications)
+            self.logger.info(f"✓ Found certifications: {', '.join(normalized_certs)} | Source: {url}")
         
         # Check for Dyo parent company
         dyo_link = footer.find("a", href=lambda x: x and "dyo.nl" in x)
@@ -761,85 +801,23 @@ class OlympiaScraper(BaseAgencyScraper):
                         sector_text = link.find("span")
                         if sector_text:
                             sector = sector_text.get_text(strip=True)
-                            sectors_found.append(sector)
+                            # Skip "Overig" (Other) category
+                            if sector.lower() != "overig":
+                                sectors_found.append(sector)
+                                all_sectors.add(sector.lower())
                 
                 if sectors_found:
-                    # Map to standardized sector names
-                    sector_mapping = {
-                        "productie": "productie",
-                        "logistiek": "logistiek_transport",
-                        "klantenservice": "klantenservice",
-                        "techniek": "techniek_engineering",
-                        "administratie": "administratie_secretarieel",
-                        "verkoop": "sales_accountmanagement",
-                        "marketing en communicatie": "marketing_communicatie",
-                        "personeelszaken": "hr_recruitment",
-                        "horeca": "horeca_catering",
-                        "groenvoorziening": "groenvoorziening",
-                        "management": "management",
-                    }
-                    
-                    for sector in sectors_found:
-                        sector_lower = sector.lower()
-                        if sector_lower in sector_mapping:
-                            all_sectors.add(sector_mapping[sector_lower])
-                    
                     self.logger.info(f"✓ Found {len(sectors_found)} sectors from homepage: {', '.join(sectors_found)} | Source: {url}")
                     break
     
-    def _extract_sectors_from_footer(self, soup: BeautifulSoup, all_sectors: Set[str], url: str) -> None:
-        """
-        Extract sectors from footer menu "Jobs by category".
-        
-        Categories include:
-        - Thuiswerk, Klantenservice, Logistiek, Productie, Administratie, Techniek, etc.
-        """
-        footer = soup.find("footer", id="footer")
-        if not footer:
-            return
-        
-        # Find footer menus
-        footer_menus = footer.find_all("div", class_="footer-menu")
-        for menu in footer_menus:
-            menu_title = menu.find("h2", class_="heading-md")
-            if menu_title and "categorie" in menu_title.get_text(strip=True).lower():
-                # This is the "Jobs by category" menu
-                links = menu.find_all("a")
-                for link in links:
-                    href = link.get("href", "")
-                    # Extract sector from URL pattern: /vacatures/{sector}/
-                    if "/vacatures/" in href:
-                        parts = href.split("/vacatures/")
-                        if len(parts) > 1:
-                            sector_slug = parts[1].strip("/").split("/")[0]
-                            # Map common slugs to our sectors
-                            sector_mapping = {
-                                "logistiek": "logistiek",
-                                "productie": "productie",
-                                "klantenservice": "klantenservice",
-                                "administratie": "administratie",
-                                "techniek": "techniek",
-                                "horeca": "horeca",
-                            }
-                            if sector_slug in sector_mapping:
-                                sector = sector_mapping[sector_slug]
-                                all_sectors.add(sector)
-                                self.logger.info(f"✓ Found sector from footer: {sector} | Source: {url}")
-    
     def _extract_offices_paginated(self, base_url: str) -> list[OfficeLocation]:
         """
-        Extract all office locations from paginated vestigingen pages.
+        Extract representative office locations from the first page only.
         
-        Loops through:
-        - https://www.olympia.nl/vestigingen/ (page 1)
-        - https://www.olympia.nl/vestigingen/?pageIndex=2
-        - https://www.olympia.nl/vestigingen/?pageIndex=3
-        - etc.
-        
-        Stops when no more offices are found.
+        Client requirement: Limit to HQ + 5-10 representative locations.
+        No need to paginate through all pages - just take representative offices.
         """
         offices = []
-        page_index = 1
         
         # Province mapping for cities
         CITY_TO_PROVINCE = {
@@ -915,101 +893,91 @@ class OlympiaScraper(BaseAgencyScraper):
             "zwolle": "Overijssel",
         }
         
-        while True:
-            # Construct URL
-            if page_index == 1:
-                url = base_url
-            else:
-                url = f"{base_url}?pageIndex={page_index}"
+        try:
+            self.logger.info(f"→ Fetching representative offices from: {base_url}")
+            soup = self.fetch_page(base_url)  # Automatically adds to evidence_urls
             
-            try:
-                self.logger.info(f"→ Fetching offices from page {page_index}: {url}")
-                soup = self.fetch_page(url)  # Automatically adds to evidence_urls
-                
-                # Find the jobs list
-                jobs_list = soup.find("ul", class_="jobs-list")
-                if not jobs_list:
-                    self.logger.info(f"→ No jobs-list found on page {page_index}, stopping pagination")
-                    break
-                
-                # Find all office location items
-                office_items = jobs_list.find_all("li")
-                if not office_items:
-                    self.logger.info(f"→ No office items found on page {page_index}, stopping pagination")
-                    break
-                
-                # Extract each office
-                for item in office_items:
-                    try:
-                        # Extract office name (h3 > a)
-                        h3 = item.find("h3")
-                        if not h3:
-                            continue
-                        a_tag = h3.find("a")
-                        if not a_tag:
-                            continue
-                        office_name = a_tag.get_text(strip=True)
-                        
-                        # Extract address
-                        address_tag = item.find("address")
-                        if not address_tag:
-                            continue
-                        
-                        address_spans = address_tag.find_all("span")
-                        if len(address_spans) < 2:
-                            continue
-                        
-                        street = address_spans[0].get_text(strip=True)
-                        postal_city = address_spans[1].get_text(strip=True)
-                        
-                        # Parse postal code and city
-                        # Format: "3262 JN Oud-Beijerland" or "5211 VW 's Hertogenbosch"
-                        parts = postal_city.split(maxsplit=2)
-                        if len(parts) >= 3:
-                            postalcode = f"{parts[0]} {parts[1]}"
-                            city = parts[2]
-                        else:
-                            postalcode = None
-                            city = postal_city
-                        
-                        # Get province from mapping
-                        city_lower = city.lower()
-                        province = CITY_TO_PROVINCE.get(city_lower, None)
-                        
-                        # Extract phone (optional)
-                        phone = None
-                        phone_link = item.find("a", href=lambda x: x and x.startswith("tel:"))
-                        if phone_link:
-                            phone = phone_link.get("href").replace("tel:", "")
-                        
-                        # Create office location
-                        office = OfficeLocation(
-                            city=city,
-                            province=province,
-                            street=street,
-                            postalcode=postalcode,
-                            phone=phone
-                        )
-                        offices.append(office)
-                        self.logger.info(f"✓ Found office: {city} ({province}) | {street} | Page {page_index}")
-                    
-                    except Exception as e:
-                        self.logger.warning(f"⚠ Error parsing office item: {e}")
+            # Find the jobs list
+            jobs_list = soup.find("ul", class_="jobs-list")
+            if not jobs_list:
+                self.logger.info(f"→ No jobs-list found, returning empty list")
+                return offices
+            
+            # Find all office location items (only from first page)
+            office_items = jobs_list.find_all("li")
+            if not office_items:
+                self.logger.info(f"→ No office items found, returning empty list")
+                return offices
+            
+            # Extract offices (limit to 10 per client requirement)
+            for item in office_items[:10]:  # Only take first 10 as representative
+                try:
+                    # Extract office name (h3 > a)
+                    h3 = item.find("h3")
+                    if not h3:
                         continue
+                    a_tag = h3.find("a")
+                    if not a_tag:
+                        continue
+                    office_name = a_tag.get_text(strip=True)
+                    
+                    # Extract address
+                    address_tag = item.find("address")
+                    if not address_tag:
+                        continue
+                    
+                    address_spans = address_tag.find_all("span")
+                    if len(address_spans) < 2:
+                        continue
+                    
+                    street = address_spans[0].get_text(strip=True)
+                    postal_city = address_spans[1].get_text(strip=True)
+                    
+                    # Parse postal code and city
+                    # Format: "3262 JN Oud-Beijerland" or "5211 VW 's Hertogenbosch"
+                    parts = postal_city.split(maxsplit=2)
+                    if len(parts) >= 3:
+                        postalcode = f"{parts[0]} {parts[1]}"
+                        city = parts[2]
+                    else:
+                        postalcode = None
+                        city = postal_city
+                    
+                    # Get province from mapping
+                    city_lower = city.lower()
+                    province = CITY_TO_PROVINCE.get(city_lower, None)
+                    
+                    # Extract phone (optional)
+                    phone = None
+                    phone_link = item.find("a", href=lambda x: x and x.startswith("tel:"))
+                    if phone_link:
+                        phone = phone_link.get("href").replace("tel:", "")
+                    
+                    # Create office location
+                    office = OfficeLocation(
+                        city=city,
+                        province=province,
+                        street=street,
+                        postalcode=postalcode,
+                        phone=phone
+                    )
+                    offices.append(office)
+                    self.logger.info(f"✓ Found office: {city} ({province}) | {street}")
+                    
+                    # Limit to 10 offices per client requirement
+                    if len(offices) >= 10:
+                        self.logger.info(f"✓ Limited office locations to 10 (per client requirement)")
+                        break
                 
-                self.logger.info(f"✓ Extracted {len(office_items)} offices from page {page_index}")
-                page_index += 1
-                
-                # Safety limit to avoid infinite loops
-                if page_index > 20:
-                    self.logger.warning(f"⚠ Reached page limit ({page_index}), stopping pagination")
-                    break
+                except Exception as e:
+                    self.logger.warning(f"⚠ Error parsing office item: {e}")
+                    continue
             
-            except Exception as e:
-                self.logger.error(f"❌ Error fetching page {page_index}: {e}")
-                break
+            self.logger.info(f"✅ Extracted {len(offices)} representative offices (limited to 10)")
         
-        self.logger.info(f"✅ Total offices extracted: {len(offices)}")
+        except Exception as e:
+            self.logger.error(f"❌ Error fetching offices: {e}")
+        
         return offices
 
 

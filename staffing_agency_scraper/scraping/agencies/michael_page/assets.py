@@ -57,7 +57,7 @@ class MichaelPageScraper(BaseAgencyScraper):
         agency.employers_page_url = f"{self.WEBSITE_URL}/werkgevers"
         agency.contact_form_url = f"{self.WEBSITE_URL}/contact"
         
-        # Known facts
+        # Known facts - will be normalized later
         agency.regions_served = ["landelijk", "internationaal"]
         
         all_text = ""
@@ -74,26 +74,7 @@ class MichaelPageScraper(BaseAgencyScraper):
                 # Apply specific functions for this page
                 if functions:
                     self._apply_functions(agency, functions, soup, page_text, url)
-                
-                # Portal detection on every page
-                if self.utils.detect_candidate_portal(soup, page_text, url):
-                    agency.digital_capabilities.candidate_portal = True
-                if self.utils.detect_client_portal(soup, page_text, url):
-                    agency.digital_capabilities.client_portal = True
-                
-                # Extract role levels on every page
-                role_levels = self.utils.fetch_role_levels(page_text, url)
-                if role_levels:
-                    if not agency.role_levels:
-                        agency.role_levels = []
-                    agency.role_levels.extend(role_levels)
-                    agency.role_levels = list(set(agency.role_levels))
-                
-                # Extract review sources
-                review_sources = self.utils.fetch_review_sources(soup, url)
-                if review_sources and not agency.review_sources:
-                    agency.review_sources = review_sources
-            
+        
             except Exception as e:
                 self.logger.warning(f"Error scraping {url}: {e}")
         
@@ -106,9 +87,18 @@ class MichaelPageScraper(BaseAgencyScraper):
         # Extract ALL common fields using base class utility method
         self.extract_all_common_fields(agency, all_text)
         
+        # Normalize regions_served to use only controlled labels
+        from staffing_agency_scraper.lib.normalize import normalize_regions_served
+        agency.regions_served = normalize_regions_served(agency.regions_served)
+        
         # Update evidence URLs
-        agency.evidence_urls = list(self.evidence_urls)
+        # agency.evidence_urls = self.get_filtered_evidence_urls()
+        agency.role_levels = []
+        agency.evidence_urls = self.evidence_urls.copy()
         agency.collected_at = self.collected_at
+
+        with open("all_text.txt", "w") as f:
+            f.write(all_text)
         
         self.logger.info(f"Completed scrape of {self.AGENCY_NAME}")
         return agency
@@ -192,21 +182,17 @@ class MichaelPageScraper(BaseAgencyScraper):
         - Page Executive (Executive Search)
         """
         text_lower = page_text.lower()
-        
-        # Werving & selectie
-        if "werving" in text_lower or ("recruitment" in text_lower and "selection" in text_lower):
-            agency.services.werving_selectie = True
-            self.logger.info(f"✓ Found service: werving_selectie | Source: {url}")
-        
+                
         # Interim/Temporary
         if "interim" in text_lower or "temporary" in text_lower or "tijdelijk" in text_lower:
             agency.services.detacheren = True
             self.logger.info(f"✓ Found service: detacheren (Interim) | Source: {url}")
         
-        # Executive Search (Page Executive)
-        if "executive" in text_lower or "page executive" in text_lower:
+        # Executive Search (Page Executive) - Require explicit confirmation
+        # "executive" alone is too generic - require "executive search" or "page executive" explicitly
+        if "executive search" in text_lower or "page executive" in text_lower or "executive recruitment" in text_lower:
             agency.services.executive_search = True
-            self.logger.info(f"✓ Found service: executive_search (Page Executive) | Source: {url}")
+            self.logger.info(f"✓ Found service: executive_search (explicit confirmation) | Source: {url}")
     
     def _extract_sectors(self, soup: BeautifulSoup, page_text: str, url: str) -> list[str]:
         """
@@ -410,17 +396,6 @@ class MichaelPageScraper(BaseAgencyScraper):
         if not header:
             return
         
-        # Look for "mypage" links (candidate portal)
-        mypage_links = soup.find_all("a", href=lambda x: x and "mypage" in x.lower())
-        if mypage_links:
-            agency.digital_capabilities.candidate_portal = True
-            self.logger.info(f"✓ Detected candidate_portal from header: /mypage | Source: {url}")
-        
-        # Check for saved jobs feature (indicates candidate portal)
-        if "saved-jobs" in str(soup).lower():
-            agency.digital_capabilities.candidate_portal = True
-            self.logger.info(f"✓ Detected saved jobs feature (candidate portal) | Source: {url}")
-        
         # Mobile app detection from footer
         footer = soup.find("footer", id="footer")
         if footer:
@@ -433,12 +408,8 @@ class MichaelPageScraper(BaseAgencyScraper):
                 self.logger.info(f"✓ Detected mobile_app: iOS + Android apps available | Source: {url}")
             
             # Check for Google reviews
-            if "richplugins" in str(footer).lower() or "google rating" in footer.get_text().lower():
-                if not agency.review_sources:
-                    agency.review_sources = []
-                if "google" not in agency.review_sources:
-                    agency.review_sources.append("google")
-                    self.logger.info(f"✓ Found review source: google | Source: {url}")
+            # Review extraction removed per client requirement
+            # Reviews must be explicitly shown/linked on the website, not inferred
             
             # Check for Top Employer badge
             if "top employer" in footer.get_text().lower() or "top_employer" in str(footer).lower():

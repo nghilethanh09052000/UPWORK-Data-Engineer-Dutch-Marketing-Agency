@@ -38,11 +38,6 @@ class CoveboScraper(BaseAgencyScraper):
             "functions": ['statistics', 'growth_signals', 'membership'],
         },
         {
-            "name": "contact",
-            "url": "https://www.covebo.nl/contact",
-            "functions": ['contact'],
-        },
-        {
             "name": "privacy",
             "url": "https://www.covebo.nl/privacy-statement/",
             "functions": ['legal'],
@@ -63,11 +58,6 @@ class CoveboScraper(BaseAgencyScraper):
             "functions": ['services_detailed'],
         },
         {
-            "name": "vestigingen",
-            "url": "https://www.covebo.nl/over-covebo/vestigingen/",
-            "functions": ['office_locations'],
-        },
-        {
             "name": "vacatures",
             "url": "https://www.covebo.nl/vacatures/",
             "functions": ['sectors_secondary'],
@@ -76,12 +66,7 @@ class CoveboScraper(BaseAgencyScraper):
             "name": "ons_verhaal",
             "url": "https://www.covebo.nl/over-covebo/ons-verhaal/",
             "functions": ['statistics', 'growth_signals'],
-        },
-        {
-            "name": "house_of_covebo_contact",
-            "url": "https://www.houseofcovebo.nl/contact/",
-            "functions": ['brand_group_contact'],
-        },
+        }
     ]
 
     # def fetch_page(self, url: str) -> BeautifulSoup:
@@ -152,37 +137,44 @@ class CoveboScraper(BaseAgencyScraper):
                 # Apply normal functions
                 self._apply_functions(agency, functions, soup, page_text, all_sectors, all_sectors_secondary, url)
                 
-                # Portal detection on every page
-                if self.utils.detect_candidate_portal(soup, page_text, url):
-                    agency.digital_capabilities.candidate_portal = True
-                if self.utils.detect_client_portal(soup, page_text, url):
-                    agency.digital_capabilities.client_portal = True
-                
-                
                 # Extract review sources
-                review_sources = self.utils.fetch_review_sources(soup, url)
-                if review_sources and not agency.review_sources:
-                    agency.review_sources = review_sources
+                # Review extraction removed per client requirement
+                # Reviews must be explicitly shown/linked on the website, not inferred
                 
                 self.logger.info(f"✅ Completed: {page_name}")
                 
             except Exception as e:
                 self.logger.error(f"❌ Error scraping {url}: {e}")
         
-        # Finalize
-        if all_sectors:
-            agency.sectors_core = sorted(list(all_sectors))
+        # Finalize sectors: normalize first, then filter
+        from staffing_agency_scraper.lib.normalize import normalize_sectors
         
-        # Filter sectors_secondary: exclude any sectors that are in sectors_core
+        if all_sectors:
+            original_sectors = sorted(list(all_sectors))
+            agency.sectors_core = normalize_sectors(original_sectors)
+            if agency.sectors_core != original_sectors:
+                self.logger.info(f"✓ Normalized sectors_core: {len(original_sectors)} -> {len(agency.sectors_core)} | Original: {original_sectors[:5]}... | Normalized: {agency.sectors_core[:5]}...")
+        
+        # Normalize sectors_secondary first, then filter out any that are in sectors_core
         if all_sectors_secondary:
-            sectors_core_lower = {s.lower() for s in all_sectors} if all_sectors else set()
-            sectors_secondary_filtered = [
-                s for s in all_sectors_secondary 
-                if s.lower() not in sectors_core_lower
-            ]
-            if sectors_secondary_filtered:
-                agency.sectors_secondary = sorted(sectors_secondary_filtered)
-                self.logger.info(f"✓ Filtered {len(sectors_secondary_filtered)} secondary sectors (excluded {len(all_sectors_secondary) - len(sectors_secondary_filtered)} that are in sectors_core)")
+            original_secondary = sorted(list(all_sectors_secondary))
+            normalized_secondary = normalize_sectors(original_secondary)
+            if normalized_secondary != original_secondary:
+                self.logger.info(f"✓ Normalized sectors_secondary: {len(original_secondary)} -> {len(normalized_secondary)} | Original: {original_secondary[:5]}... | Normalized: {normalized_secondary[:5]}...")
+            
+            # Filter: exclude any sectors that are already in sectors_core (case-insensitive comparison)
+            if agency.sectors_core:
+                sectors_core_lower = {s.lower() for s in agency.sectors_core}
+                sectors_secondary_filtered = [
+                    s for s in normalized_secondary 
+                    if s.lower() not in sectors_core_lower
+                ]
+                excluded_count = len(normalized_secondary) - len(sectors_secondary_filtered)
+                if excluded_count > 0:
+                    self.logger.info(f"✓ Filtered sectors_secondary: removed {excluded_count} duplicate(s) that are in sectors_core")
+                agency.sectors_secondary = sectors_secondary_filtered
+            else:
+                agency.sectors_secondary = normalized_secondary
         
 
         # ==================== APPLY ALL COMMON UTILS EXTRACTIONS ====================
@@ -196,14 +188,91 @@ class CoveboScraper(BaseAgencyScraper):
         self.logger.info("✅ Automatic utils extractions completed")
         self.logger.info("=" * 80)
         
-        # Deduplicate evidence_urls by converting to set, then back to sorted list
-        agency.evidence_urls = sorted(list(set(self.evidence_urls)))
+        # Final normalization and filtering of sectors (after extract_all_common_fields, in case it overwrote them)
+        from staffing_agency_scraper.lib.normalize import normalize_sectors
+        
+        if agency.sectors_core:
+            original_core = agency.sectors_core.copy()
+            agency.sectors_core = normalize_sectors(agency.sectors_core)
+            if agency.sectors_core != original_core:
+                self.logger.info(f"✓ Final normalized sectors_core: {len(original_core)} -> {len(agency.sectors_core)} | Original: {original_core[:5]}... | Normalized: {agency.sectors_core[:5]}...")
+        
+        if agency.sectors_secondary:
+            original_secondary = agency.sectors_secondary.copy()
+            normalized_secondary = normalize_sectors(agency.sectors_secondary)
+            if normalized_secondary != original_secondary:
+                self.logger.info(f"✓ Final normalized sectors_secondary: {len(original_secondary)} -> {len(normalized_secondary)} | Original: {original_secondary[:5]}... | Normalized: {normalized_secondary[:5]}...")
+            
+            # Filter: exclude any sectors that are already in sectors_core (case-insensitive comparison)
+            if agency.sectors_core:
+                sectors_core_lower = {s.lower() for s in agency.sectors_core}
+                sectors_secondary_filtered = [
+                    s for s in normalized_secondary 
+                    if s.lower() not in sectors_core_lower
+                ]
+                excluded_count = len(normalized_secondary) - len(sectors_secondary_filtered)
+                if excluded_count > 0:
+                    self.logger.info(f"✓ Filtered sectors_secondary: removed {excluded_count} duplicate(s) that are in sectors_core")
+                agency.sectors_secondary = sectors_secondary_filtered
+            else:
+                agency.sectors_secondary = normalized_secondary
+        
+        # Set office_locations to empty array per client requirement
+        agency.office_locations = []
+        self.logger.info(f"✓ Set office_locations: [] (empty per client requirement)")
+        
+        # Filter and clean evidence URLs: exclude portal URLs and ensure uniqueness
+        filtered_urls = []
+        seen_urls = set()
+        
+        # Portal URLs to exclude
+        exclude_patterns = [
+            "/portal/",
+            "portal.covebo.nl",
+            "covebo_resource",
+            "covebo_klant",
+        ]
+        
+        for url in self.evidence_urls:
+            if not url:
+                continue
+            
+            # Normalize URL for comparison (remove trailing slash, lowercase)
+            url_normalized = url.rstrip('/').lower()
+            
+            # Skip if already seen (deduplicate)
+            if url_normalized in seen_urls:
+                continue
+            
+            # Check if URL matches exclude patterns
+            should_exclude = False
+            for pattern in exclude_patterns:
+                if pattern.lower() in url_normalized:
+                    should_exclude = True
+                    self.logger.info(f"  Excluded portal URL: {url}")
+                    break
+            
+            if should_exclude:
+                continue
+            
+            # Add to filtered list
+            filtered_urls.append(url)
+            seen_urls.add(url_normalized)
+        
+        agency.evidence_urls = filtered_urls
         agency.collected_at = self.collected_at
+        
+        if len(filtered_urls) != len(self.evidence_urls):
+            excluded_count = len(self.evidence_urls) - len(filtered_urls)
+            self.logger.info(f"✓ Filtered evidence URLs: excluded {excluded_count} portal/duplicate URLs | Final count: {len(filtered_urls)}")
         
         self.logger.info("=" * 80)
         self.logger.info(f"✅ Completed scrape of {self.AGENCY_NAME}")
         self.logger.info(f"📄 Evidence URLs: {len(agency.evidence_urls)}")
         self.logger.info("=" * 80)
+
+        with open("all_text.txt", "w") as f:
+            f.write(all_text)
         
         return agency
     
@@ -227,18 +296,14 @@ class CoveboScraper(BaseAgencyScraper):
                 agency.services = services
             
             elif func_name == "contact":
-                email = self.utils.fetch_contact_email(page_text, url)
+                # email = self.utils.fetch_contact_email(page_text, url)
+                email = None
                 phone = self.utils.fetch_contact_phone(page_text, url)
-                offices = self.utils.fetch_office_locations(soup, url)
+                # Office locations are extracted via the 'office_locations' function, not here
                 if email:
                     agency.contact_email = email
                 if phone:
                     agency.contact_phone = phone
-                if offices:
-                    agency.office_locations = offices
-                    if offices and not agency.hq_city:
-                        agency.hq_city = offices[0].city
-                        agency.hq_province = offices[0].province
             
             elif func_name == "legal":
                 self._extract_legal_info(soup, page_text, agency, url)
@@ -254,9 +319,6 @@ class CoveboScraper(BaseAgencyScraper):
             
             elif func_name == "jsonld":
                 self._extract_jsonld(soup, agency, url)
-            
-            elif func_name == "office_locations":
-                self._extract_office_locations(soup, agency, url)
             
             elif func_name == "sectors_core":
                 self._extract_sectors_core(soup, all_sectors, url)
@@ -340,7 +402,7 @@ class CoveboScraper(BaseAgencyScraper):
                 email = email_href.replace("mailto:", "").strip()
                 # Use this email if we don't have one yet, or if it's from the brand group
                 if not agency.contact_email:
-                    agency.contact_email = email
+                    agency.contact_email = None
                     self.logger.info(f"✓ Found contact email: {email} | Source: {url}")
                 else:
                     # Log that we found brand group email but already have one
@@ -352,7 +414,7 @@ class CoveboScraper(BaseAgencyScraper):
             if email_match:
                 email = email_match.group(1)
                 if not agency.contact_email:
-                    agency.contact_email = email
+                    agency.contact_email = None
                     self.logger.info(f"✓ Found contact email from text: {email} | Source: {url}")
         
         # Extract phone from tel link
@@ -1039,14 +1101,8 @@ class CoveboScraper(BaseAgencyScraper):
                 agency.digital_capabilities.client_portal = True
                 self.logger.info(f"✓ Found client portal (fallback): {client_portal_url} | Source: {url}")
         
-        # Add portal URLs to evidence_urls
-        if candidate_portal_url:
-            self.evidence_urls.append(candidate_portal_url)
-        if client_portal_url:
-            self.evidence_urls.append(client_portal_url)
-        
-        # Also add the portal page itself
-        self.evidence_urls.append(url)
+        # Do NOT add portal URLs to evidence_urls (excluded per client requirement)
+        # Portal URLs are user-specific login pages, not business-facing pages
         
         if candidate_portal_url or client_portal_url:
             self.logger.info(f"✓ Portal extraction completed | Source: {url}")
@@ -1121,18 +1177,7 @@ class CoveboScraper(BaseAgencyScraper):
             if "zzp" not in [s.lower() for s in services_found]:
                 services_found.append("zzp")
         
-        # Add service URLs to evidence_urls
-        for service_url in service_urls:
-            # Convert relative URLs to absolute
-            if service_url.startswith("/"):
-                service_url = f"{self.WEBSITE_URL}{service_url}"
-            elif not service_url.startswith("http"):
-                service_url = f"{self.WEBSITE_URL}/{service_url}"
-            
-            if service_url not in self.evidence_urls:
-                self.evidence_urls.append(service_url)
-                self.logger.info(f"✓ Added service URL to evidence: {service_url}")
-        
+  
         # Add the services page itself to evidence_urls
         if url not in self.evidence_urls:
             self.evidence_urls.append(url)
@@ -1247,168 +1292,6 @@ class CoveboScraper(BaseAgencyScraper):
         if url not in self.evidence_urls:
             self.evidence_urls.append(url)
     
-    def _extract_office_locations(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
-        """
-        Extract office locations from the vestigingen page.
-        First tries to extract from data-markers JSON attribute, then falls back to card elements.
-        """
-        self.logger.info(f"🔍 Extracting office locations from {url}")
-        
-        if not agency.office_locations:
-            agency.office_locations = []
-        
-        offices_found = []
-        office_urls = set()
-        
-        # First, try to extract from data-markers JSON attribute
-        map_items = soup.find("div", id="map-items")
-        if map_items:
-            data_markers = map_items.get("data-markers", "")
-            if data_markers:
-                try:
-                    # Decode HTML entities in the JSON string
-                    decoded_markers = html.unescape(data_markers)
-                    markers = json.loads(decoded_markers)
-                    
-                    for marker in markers:
-                        title = marker.get("title", "")
-                        address = marker.get("address", "")
-                        
-                        # Extract city from title (e.g., "Covebo Almelo Bouw & Techniek" -> "Almelo")
-                        # Or from address if title doesn't contain city
-                        city_name = None
-                        
-                        # Try to extract city from title
-                        # Format: "Covebo [City]" or "Covebo [City] [Type]"
-                        if "Covebo" in title:
-                            parts = title.replace("Covebo", "").strip().split()
-                            if parts:
-                                # First word after "Covebo" is usually the city
-                                city_name = parts[0]
-                        
-                        # If no city from title, try to extract from address
-                        if not city_name and address:
-                            # Address format: "Street, Postal Code City" or "Street, Postal Code"
-                            # Try to find city name (usually after postal code)
-                            # Match postal code pattern (4 digits, space, 2 letters)
-                            postal_match = re.search(r'\d{4}\s?[A-Z]{2}', address)
-                            if postal_match:
-                                # City might be after postal code
-                                after_postal = address[postal_match.end():].strip()
-                                if after_postal:
-                                    # Take first word as city
-                                    city_name = after_postal.split()[0] if after_postal.split() else None
-                        
-                        if not city_name:
-                            continue
-                        
-                        # Determine province using utils
-                        province = self.utils.map_city_to_province(city_name)
-                        
-                        # Create office location
-                        office = OfficeLocation(
-                            city=city_name,
-                            province=province,
-                        )
-                        
-                        # Check if already exists (avoid duplicates)
-                        if not any(off.city == city_name for off in offices_found):
-                            offices_found.append(office)
-                            self.logger.info(f"✓ Office from JSON: {city_name}, {province} | Source: {url}")
-                    
-                    self.logger.info(f"✓ Extracted {len(offices_found)} offices from JSON markers | Source: {url}")
-                except (json.JSONDecodeError, Exception) as e:
-                    self.logger.warning(f"⚠ Failed to parse data-markers JSON: {e} | Source: {url}")
-        
-        # Fallback: Extract from card elements if JSON extraction didn't work or found fewer offices
-        if len(offices_found) == 0:
-            cards = soup.find_all("div", class_="cvb-card--office")
-            if not cards:
-                # Try alternative class
-                cards = soup.find_all("div", class_=lambda x: x and "cvb-card" in x and "office" in x)
-            
-            for card in cards:
-                try:
-                    # Extract title from h3
-                    h3 = card.find("h3", class_="cvb-card__title")
-                    if not h3:
-                        continue
-                    
-                    title_text = h3.get_text(strip=True)
-                    
-                    # Extract city from title
-                    # Format: "Covebo [City]" or "Covebo [City] [Type]"
-                    city_name = None
-                    if "Covebo" in title_text:
-                        parts = title_text.replace("Covebo", "").strip().split()
-                        if parts:
-                            city_name = parts[0]
-                    
-                    # If no city from title, try address
-                    if not city_name:
-                        address_elem = card.find("span", class_="address")
-                        if address_elem:
-                            address = address_elem.get_text(strip=True)
-                            # Extract city from address (after postal code)
-                            postal_match = re.search(r'\d{4}\s?[A-Z]{2}', address)
-                            if postal_match:
-                                after_postal = address[postal_match.end():].strip()
-                                if after_postal:
-                                    city_name = after_postal.split()[0] if after_postal.split() else None
-                    
-                    if not city_name:
-                        continue
-                    
-                    # Get office URL from the link
-                    link = card.find("a", class_="cvb-card__block-link", href=True)
-                    if link:
-                        office_path = link.get("href", "")
-                        if office_path:
-                            # Convert relative URL to absolute
-                            if office_path.startswith("/"):
-                                office_url = f"{self.WEBSITE_URL}{office_path}"
-                            else:
-                                office_url = f"{self.WEBSITE_URL}/{office_path}"
-                            office_urls.add(office_url)
-                    
-                    # Determine province using utils
-                    province = self.utils.map_city_to_province(city_name)
-                    
-                    # Create office location
-                    office = OfficeLocation(
-                        city=city_name,
-                        province=province,
-                    )
-                    
-                    # Check if already exists (avoid duplicates)
-                    if not any(off.city == city_name for off in offices_found):
-                        offices_found.append(office)
-                        self.logger.info(f"✓ Office from card: {city_name}, {province} | Source: {url}")
-                
-                except Exception as e:
-                    self.logger.error(f"Error processing office card: {e}")
-                    continue
-        
-        # Add offices to agency
-        for office in offices_found:
-            if not any(off.city == office.city for off in agency.office_locations):
-                agency.office_locations.append(office)
-        
-        # Add office URLs to evidence_urls
-        for office_url in office_urls:
-            if office_url not in self.evidence_urls:
-                self.evidence_urls.append(office_url)
-                self.logger.info(f"✓ Added office URL to evidence: {office_url}")
-        
-        # Add the vestigingen page itself to evidence_urls
-        if url not in self.evidence_urls:
-            self.evidence_urls.append(url)
-        
-        if offices_found:
-            self.logger.info(f"✓ Total offices extracted: {len(offices_found)} | Source: {url}")
-        else:
-            self.logger.warning(f"⚠ No offices found on {url}")
-
 
 @dg.asset(group_name="agencies")
 def covebo_scrape() -> dg.Output[dict]:

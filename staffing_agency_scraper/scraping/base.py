@@ -75,6 +75,18 @@ class BaseAgencyScraper(ABC):
         self.collected_at = datetime.utcnow()
         # Initialize utility functions (can be overridden in subclass)
         self.utils = AgencyScraperUtils(logger=self.logger)
+    
+    def get_filtered_evidence_urls(self) -> list[str]:
+        """
+        Get filtered evidence URLs, removing API endpoints, user pages, and duplicates.
+        
+        Returns
+        -------
+        list[str]
+            Filtered list of human-readable, relevant URLs
+        """
+        from staffing_agency_scraper.lib.normalize import filter_evidence_urls
+        return filter_evidence_urls(self.evidence_urls)
 
     @abstractmethod
     def scrape(self) -> Agency:
@@ -314,85 +326,181 @@ class BaseAgencyScraper(ABC):
         
         # ==================== Market Positioning ====================
         if not agency.company_size_fit:
-            agency.company_size_fit = self.utils.fetch_company_size_fit(all_text, url)
+            result = self.utils.fetch_company_size_fit(all_text, url)
+            if result:
+                agency.company_size_fit = result
+                self.logger.info(f"✓ Set company_size_fit: {result} | Source URL: {url}")
         
         if not agency.customer_segments:
-            agency.customer_segments = self.utils.fetch_customer_segments(all_text, url)
+            result = self.utils.fetch_customer_segments(all_text, url)
+            if result:
+                agency.customer_segments = result
+                self.logger.info(f"✓ Set customer_segments: {result} | Source URL: {url}")
         
         if not agency.focus_segments:
-            agency.focus_segments = self.utils.fetch_focus_segments(all_text, url)
+            result = self.utils.fetch_focus_segments(all_text, url)
+            if result:
+                agency.focus_segments = result
+                self.logger.info(f"✓ Set focus_segments: {result} | Source URL: {url}")
+        
+        # Normalize sectors and focus segments immediately after extraction
+        # This ensures consistency even if scrapers set them directly
+        # ALWAYS normalize these fields to use controlled vocabulary (IT -> ICT, etc.)
+        from staffing_agency_scraper.lib.normalize import normalize_sectors, normalize_focus_segments
+        
+        # Normalize sectors_core (always, even if already set)
+        if agency.sectors_core:
+            original = agency.sectors_core.copy()
+            agency.sectors_core = normalize_sectors(agency.sectors_core)
+            if agency.sectors_core != original:
+                self.logger.info(f"✓ Normalized sectors_core: {original} -> {agency.sectors_core} | Source URL: {url}")
+        
+        # Normalize sectors_secondary (always, even if already set)
+        if agency.sectors_secondary:
+            original = agency.sectors_secondary.copy()
+            agency.sectors_secondary = normalize_sectors(agency.sectors_secondary)
+            if agency.sectors_secondary != original:
+                self.logger.info(f"✓ Normalized sectors_secondary: {original} -> {agency.sectors_secondary} | Source URL: {url}")
+        
+        # Normalize focus_segments (always, even if already set)
+        if agency.focus_segments:
+            original = agency.focus_segments.copy()
+            agency.focus_segments = normalize_focus_segments(agency.focus_segments)
+            if agency.focus_segments != original:
+                self.logger.info(f"✓ Normalized focus_segments: {original} -> {agency.focus_segments} | Source URL: {url}")
         
         if not agency.shift_types_supported:
-            agency.shift_types_supported = self.utils.fetch_shift_types_supported(all_text, url)
+            result = self.utils.fetch_shift_types_supported(all_text, url)
+            if result:
+                agency.shift_types_supported = result
+                self.logger.info(f"✓ Set shift_types_supported: {result} | Source URL: {url}")
         
         if not agency.typical_use_cases:
-            agency.typical_use_cases = self.utils.fetch_typical_use_cases(all_text, url)
+            result = self.utils.fetch_typical_use_cases(all_text, url)
+            if result:
+                agency.typical_use_cases = result
+                self.logger.info(f"✓ Set typical_use_cases: {result} | Source URL: {url}")
         
         if not agency.role_levels:
-            agency.role_levels = self.utils.fetch_role_levels(all_text, url)
+            result = self.utils.fetch_role_levels(all_text, url)
+            if result:
+                agency.role_levels = result
+                self.logger.info(f"✓ Set role_levels: {result} | Source URL: {url}")
         
         # ==================== Geographic Coverage ====================
         if not agency.regions_served:
-            agency.regions_served = self.utils.fetch_regions_served(all_text, url)
+            result = self.utils.fetch_regions_served(all_text, url)
+            if result:
+                agency.regions_served = result
+                self.logger.info(f"✓ Set regions_served: {result} | Source URL: {url}")
+        
+        # Normalize regions_served to ensure consistency (safety measure)
+        # This ensures all regions_served use only controlled labels (heel_Nederland -> landelijk, etc.)
+        from staffing_agency_scraper.lib.normalize import normalize_regions_served
+        original_regions = agency.regions_served.copy() if agency.regions_served else []
+        agency.regions_served = normalize_regions_served(agency.regions_served)
+        if agency.regions_served != original_regions:
+            self.logger.info(f"✓ Normalized regions_served: {original_regions} -> {agency.regions_served} | Source URL: {url}")
         
         # ==================== Volume & Performance ====================
         if agency.volume_specialisation == "unknown":
-            agency.volume_specialisation = self.utils.fetch_volume_specialisation(all_text, url)
+            result = self.utils.fetch_volume_specialisation(all_text, url)
+            if result and result != "unknown":
+                agency.volume_specialisation = result
+                self.logger.info(f"✓ Set volume_specialisation: {result} | Source URL: {url}")
         
         if not agency.speed_claims:
-            agency.speed_claims = self.utils.fetch_speed_claims(all_text, url)
+            result = self.utils.fetch_speed_claims(all_text, url)
+            if result:
+                agency.speed_claims = result
+                self.logger.info(f"✓ Set speed_claims: {result} | Source URL: {url}")
         
         if not agency.avg_time_to_fill_days:
-            agency.avg_time_to_fill_days = self.utils.fetch_avg_time_to_fill(all_text, url)
+            result = self.utils.fetch_avg_time_to_fill(all_text, url)
+            if result:
+                agency.avg_time_to_fill_days = result
+                self.logger.info(f"✓ Set avg_time_to_fill_days: {result} | Source URL: {url}")
         
         if not agency.candidate_pool_size_estimate:
-            agency.candidate_pool_size_estimate = self.utils.fetch_candidate_pool_size(all_text, url)
+            result = self.utils.fetch_candidate_pool_size(all_text, url)
+            if result:
+                agency.candidate_pool_size_estimate = result
+                self.logger.info(f"✓ Set candidate_pool_size_estimate: {result} | Source URL: {url}")
         
         if not agency.annual_placements_estimate:
-            agency.annual_placements_estimate = self.utils.fetch_annual_placements(all_text, url)
+            result = self.utils.fetch_annual_placements(all_text, url)
+            if result:
+                agency.annual_placements_estimate = result
+                self.logger.info(f"✓ Set annual_placements_estimate: {result} | Source URL: {url}")
         
         # ==================== Pricing & Commercial ====================
         if agency.pricing_model == "unknown":
-            agency.pricing_model = self.utils.fetch_pricing_model(all_text, url)
+            result = self.utils.fetch_pricing_model(all_text, url)
+            if result and result != "unknown":
+                agency.pricing_model = result
+                self.logger.info(f"✓ Set pricing_model: {result} | Source URL: {url}")
         
         if not agency.pricing_transparency:
-            agency.pricing_transparency = self.utils.fetch_pricing_transparency(all_text, url)
+            result = self.utils.fetch_pricing_transparency(all_text, url)
+            if result:
+                agency.pricing_transparency = result
+                self.logger.info(f"✓ Set pricing_transparency: {result} | Source URL: {url}")
         
         if agency.no_cure_no_pay is None:
-            agency.no_cure_no_pay = self.utils.fetch_no_cure_no_pay(all_text, url)
+            result = self.utils.fetch_no_cure_no_pay(all_text, url)
+            if result is not None:
+                agency.no_cure_no_pay = result
+                self.logger.info(f"✓ Set no_cure_no_pay: {result} | Source URL: {url}")
         
         if not agency.omrekenfactor_min and not agency.omrekenfactor_max:
             omrekenfactor_min, omrekenfactor_max = self.utils.fetch_omrekenfactor(all_text, url)
             if omrekenfactor_min:
                 agency.omrekenfactor_min = omrekenfactor_min
+                self.logger.info(f"✓ Set omrekenfactor_min: {omrekenfactor_min} | Source URL: {url}")
             if omrekenfactor_max:
                 agency.omrekenfactor_max = omrekenfactor_max
+                self.logger.info(f"✓ Set omrekenfactor_max: {omrekenfactor_max} | Source URL: {url}")
         
         if not agency.example_pricing_hint:
             example_pricing = self.utils.fetch_example_pricing_hint(all_text, url)
             if example_pricing:
                 agency.example_pricing_hint = example_pricing
+                self.logger.info(f"✓ Set example_pricing_hint: {example_pricing} | Source URL: {url}")
         
         if not agency.avg_hourly_rate_low and not agency.avg_hourly_rate_high:
             rate_low, rate_high = self.utils.fetch_avg_hourly_rate(all_text, url)
             if rate_low:
                 agency.avg_hourly_rate_low = rate_low
+                self.logger.info(f"✓ Set avg_hourly_rate_low: {rate_low} | Source URL: {url}")
             if rate_high:
                 agency.avg_hourly_rate_high = rate_high
+                self.logger.info(f"✓ Set avg_hourly_rate_high: {rate_high} | Source URL: {url}")
         
         # ==================== Legal & Compliance ====================
         if agency.uses_inlenersbeloning is None:
-            agency.uses_inlenersbeloning = self.utils.fetch_uses_inlenersbeloning(all_text, url)
+            result = self.utils.fetch_uses_inlenersbeloning(all_text, url)
+            if result is not None:
+                agency.uses_inlenersbeloning = result
+                self.logger.info(f"✓ Set uses_inlenersbeloning: {result} | Source URL: {url}")
         
         if agency.applies_inlenersbeloning_from_day1 is None:
-            agency.applies_inlenersbeloning_from_day1 = self.utils.fetch_applies_inlenersbeloning_from_day1(all_text, url)
+            result = self.utils.fetch_applies_inlenersbeloning_from_day1(all_text, url)
+            if result is not None:
+                agency.applies_inlenersbeloning_from_day1 = result
+                self.logger.info(f"✓ Set applies_inlenersbeloning_from_day1: {result} | Source URL: {url}")
         
         # ==================== Assignment Conditions ====================
         if not agency.min_assignment_duration_weeks:
-            agency.min_assignment_duration_weeks = self.utils.fetch_min_assignment_duration(all_text, url)
+            result = self.utils.fetch_min_assignment_duration(all_text, url)
+            if result:
+                agency.min_assignment_duration_weeks = result
+                self.logger.info(f"✓ Set min_assignment_duration_weeks: {result} | Source URL: {url}")
         
         if not agency.min_hours_per_week:
-            agency.min_hours_per_week = self.utils.fetch_min_hours_per_week(all_text, url)
+            result = self.utils.fetch_min_hours_per_week(all_text, url)
+            if result:
+                agency.min_hours_per_week = result
+                self.logger.info(f"✓ Set min_hours_per_week: {result} | Source URL: {url}")
         
         # ==================== Takeover Policy ====================
         if not agency.takeover_policy or (agency.takeover_policy.overname_fee_model == "unknown" if hasattr(agency.takeover_policy, 'overname_fee_model') else True):
@@ -404,30 +512,21 @@ class BaseAgencyScraper(ABC):
                     agency.takeover_policy = TakeoverPolicy(**takeover_data)
                 else:
                     agency.takeover_policy = takeover_data
+                self.logger.info(f"✓ Set takeover_policy: {takeover_data.get('overname_fee_model', 'unknown')} | Source URL: {url}")
         
         # ==================== Portal & Review Detection (requires soup) ====================
         if soup:
             # Portal detection
             if self.utils.detect_candidate_portal(soup, all_text, url):
                 agency.digital_capabilities.candidate_portal = True
+                self.logger.info(f"✓ Set candidate_portal: True | Source URL: {url}")
             if self.utils.detect_client_portal(soup, all_text, url):
                 agency.digital_capabilities.client_portal = True
+                self.logger.info(f"✓ Set client_portal: True | Source URL: {url}")
             
-            # Review sources
-            if not agency.review_sources:
-                agency.review_sources = self.utils.fetch_review_sources(soup, url)
-            
-            # Review rating and count
-            if not agency.review_rating and not agency.review_count:
-                rating, count = self.utils.fetch_review_rating_and_count(soup, url)
-                if rating:
-                    agency.review_rating = rating
-                if count:
-                    agency.review_count = count
-            
-            # External review URLs
-            if agency.review_sources and not agency.external_review_urls:
-                agency.external_review_urls = self.utils.fetch_external_review_urls(agency.review_sources)
+            # Review fields: Only set if explicitly shown/linked on agency website
+            # Removed automatic extraction - reviews must be explicitly embedded/linked
+            # Individual scrapers can set review fields if they find explicit evidence
         
         # ==================== Growth Signals ====================
         if not agency.growth_signals:
@@ -469,8 +568,13 @@ class BaseAgencyScraper(ABC):
                     self.logger.info(f"✓ Found KvK: {agency.kvk_number} | Source: {url}")
                 
                 if not agency.contact_phone and contact_info.get("contact_phone"):
-                    agency.contact_phone = contact_info["contact_phone"]
-                    self.logger.info(f"✓ Found phone: {agency.contact_phone} | Source: {url}")
+                    from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                    original_phone = contact_info["contact_phone"]
+                    agency.contact_phone = normalize_contact_phone(original_phone)
+                    if agency.contact_phone != original_phone:
+                        self.logger.info(f"✓ Found phone: {original_phone} -> normalized to: {agency.contact_phone} | Source: {url}")
+                    else:
+                        self.logger.info(f"✓ Found phone: {agency.contact_phone} | Source: {url}")
                 
                 if not agency.contact_email and contact_info.get("contact_email"):
                     agency.contact_email = contact_info["contact_email"]
@@ -509,15 +613,20 @@ class BaseAgencyScraper(ABC):
             except Exception as e:
                 self.logger.warning(f"✗ Error scraping {url}: {e}")
         
-        # Dedupe and set certifications
+        # Dedupe, normalize, and set certifications
         if all_certifications:
-            agency.certifications = list(set(all_certifications))
+            from staffing_agency_scraper.lib.normalize import normalize_certifications
+            original_certs = list(set(all_certifications))
+            agency.certifications = normalize_certifications(original_certs)
+            if agency.certifications != original_certs:
+                self.logger.info(f"✓ Normalized certifications: {original_certs} -> {agency.certifications}")
             self.logger.info(f"Total certifications: {agency.certifications}")
         
-        # Dedupe and set sectors
+        # Dedupe and set sectors, then normalize
         if all_sectors:
-            agency.sectors_core = list(set(all_sectors))[:10]  # Limit to top 10
-            self.logger.info(f"Total sectors: {agency.sectors_core}")
+            from staffing_agency_scraper.lib.normalize import normalize_sectors
+            agency.sectors_core = normalize_sectors(list(set(all_sectors))[:10])  # Limit to top 10, then normalize
+            self.logger.info(f"Total sectors (normalized): {agency.sectors_core}")
         
         # Log summary of what was found
         self.logger.info(f"--- Extraction Summary for {self.AGENCY_NAME} ---")
@@ -530,8 +639,83 @@ class BaseAgencyScraper(ABC):
         self.logger.info(f"  Certifications: {len(agency.certifications or [])} found")
         self.logger.info(f"  Pages scraped: {len(self.evidence_urls)}")
         
-        # Update evidence URLs
-        agency.evidence_urls = self.evidence_urls.copy()
+        # Filter and clean evidence URLs
+        from staffing_agency_scraper.lib.normalize import filter_evidence_urls
+        original_count = len(self.evidence_urls)
+        filtered_urls = filter_evidence_urls(self.evidence_urls)
+        
+        if len(filtered_urls) != original_count:
+            self.logger.info(
+                f"✓ Filtered evidence URLs: {original_count} -> {len(filtered_urls)} "
+                f"(removed {original_count - len(filtered_urls)} invalid/duplicate URLs)"
+            )
+        
+        # Normalize sectors and focus segments to use controlled vocabulary
+        from staffing_agency_scraper.lib.normalize import normalize_sectors, normalize_focus_segments
+        
+        if agency.sectors_core:
+            original_sectors = agency.sectors_core.copy()
+            agency.sectors_core = normalize_sectors(agency.sectors_core)
+            if agency.sectors_core != original_sectors:
+                self.logger.info(
+                    f"✓ Normalized sectors_core: {len(original_sectors)} -> {len(agency.sectors_core)} "
+                    f"| Original: {original_sectors[:5]}... | Normalized: {agency.sectors_core[:5]}..."
+                )
+        
+        if agency.sectors_secondary:
+            original_secondary = agency.sectors_secondary.copy()
+            agency.sectors_secondary = normalize_sectors(agency.sectors_secondary)
+            if agency.sectors_secondary != original_secondary:
+                self.logger.info(
+                    f"✓ Normalized sectors_secondary: {len(original_secondary)} -> {len(agency.sectors_secondary)} "
+                    f"| Original: {original_secondary[:5]}... | Normalized: {agency.sectors_secondary[:5]}..."
+                )
+        
+        if agency.focus_segments:
+            original_focus = agency.focus_segments.copy()
+            agency.focus_segments = normalize_focus_segments(agency.focus_segments)
+            if agency.focus_segments != original_focus:
+                self.logger.info(
+                    f"✓ Normalized focus_segments: {len(original_focus)} -> {len(agency.focus_segments)} "
+                    f"| Original: {original_focus} | Normalized: {agency.focus_segments}"
+                )
+        
+        # Update evidence URLs with filtered list
+        agency.evidence_urls = filtered_urls
+        
+        # Validate review fields: if one exists without the other, set both to null
+        # Rule: Review data may only be included if shown or linked on the agency's own website
+        # If review_sources exist but review_rating doesn't (or vice versa), remove them both
+        if agency.review_sources and (not agency.review_rating or not agency.review_count):
+            self.logger.warning(
+                f"⚠ Inconsistent review data: review_sources={agency.review_sources} but "
+                f"review_rating={agency.review_rating}, review_count={agency.review_count}. "
+                f"Setting all review fields to null."
+            )
+            agency.review_sources = []
+            agency.review_rating = None
+            agency.review_count = None
+            agency.external_review_urls = []
+        
+        if (agency.review_rating or agency.review_count) and not agency.review_sources:
+            self.logger.warning(
+                f"⚠ Inconsistent review data: review_rating={agency.review_rating}, "
+                f"review_count={agency.review_count} but no review_sources. "
+                f"Setting all review fields to null."
+            )
+            agency.review_sources = []
+            agency.review_rating = None
+            agency.review_count = None
+            agency.external_review_urls = []
+        
+        # Normalize contact phone if set
+        from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+        if agency.contact_phone:
+            original_phone = agency.contact_phone
+            agency.contact_phone = normalize_contact_phone(agency.contact_phone)
+            if agency.contact_phone != original_phone:
+                self.logger.info(f"✓ Normalized contact_phone: {original_phone} -> {agency.contact_phone}")
+        
         agency.collected_at = self.collected_at
         
         return agency

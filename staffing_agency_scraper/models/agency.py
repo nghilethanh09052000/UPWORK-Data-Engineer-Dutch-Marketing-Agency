@@ -80,21 +80,26 @@ class AgencyServices(BaseModel):
     """
     Services offered by the staffing agency.
 
-    All fields default to False to indicate "not detected".
+    All fields default to None (null in JSON).
+    - None (null) = unknown / not stated
+    - True = explicitly confirmed as offered
+    - False = explicitly stated as NOT offered (rare - only use when website clearly states service is not available)
+    
+    Rule: Use None (null) for unknown. Only set to False if website explicitly states service is not offered.
     """
 
-    uitzenden: bool = False
-    detacheren: bool = False
-    werving_selectie: bool = False
-    payrolling: bool = False
-    zzp_bemiddeling: bool = False
-    vacaturebemiddeling_only: bool = False
-    inhouse_services: bool = False
-    msp: bool = False
-    rpo: bool = False
-    executive_search: bool = False
-    opleiden_ontwikkelen: bool = False
-    reintegratie_outplacement: bool = False
+    uitzenden: bool | None = None
+    detacheren: bool | None = None
+    werving_selectie: bool | None = None
+    payrolling: bool | None = None
+    zzp_bemiddeling: bool | None = None
+    vacaturebemiddeling_only: bool | None = None
+    inhouse_services: bool | None = None
+    msp: bool | None = None
+    rpo: bool | None = None
+    executive_search: bool | None = None
+    opleiden_ontwikkelen: bool | None = None
+    reintegratie_outplacement: bool | None = None
 
 
 class PhaseSystem(BaseModel):
@@ -115,25 +120,37 @@ class TakeoverPolicy(BaseModel):
 
 
 class DigitalCapabilities(BaseModel):
-    """Digital capabilities of the agency."""
+    """
+    Digital capabilities of the agency.
+    
+    All fields default to None (null in JSON).
+    Only set to True when explicitly confirmed on the website.
+    Never set to False - use None (null) for unknown/unconfirmed.
+    """
 
-    client_portal: bool = False
-    candidate_portal: bool = False
-    mobile_app: bool = False
-    api_available: bool = False
-    realtime_vacancy_feed: bool = False
-    realtime_availability_feed: bool = False
-    self_service_contracting: bool = False
+    client_portal: bool | None = None
+    candidate_portal: bool | None = None
+    mobile_app: bool | None = None
+    api_available: bool | None = None
+    realtime_vacancy_feed: bool | None = None
+    realtime_availability_feed: bool | None = None
+    self_service_contracting: bool | None = None
 
 
 class AICapabilities(BaseModel):
-    """AI capabilities of the agency."""
+    """
+    AI capabilities of the agency.
+    
+    All fields default to None (null in JSON).
+    Only set to True when explicitly confirmed on the website.
+    Never set to False - use None (null) for unknown/unconfirmed.
+    """
 
-    internal_ai_matching: bool = False
-    predictive_planning: bool = False
-    chatbot_for_candidates: bool = False
-    chatbot_for_clients: bool = False
-    ai_screening: bool = False
+    internal_ai_matching: bool | None = None
+    predictive_planning: bool | None = None
+    chatbot_for_candidates: bool | None = None
+    chatbot_for_clients: bool | None = None
+    ai_screening: bool | None = None
 
 
 class Agency(BaseModel):
@@ -243,5 +260,6 @@ class Agency(BaseModel):
 
     def to_json_dict(self) -> dict:
         """Convert to JSON-serializable dictionary."""
-        return self.model_dump(mode="json")
+        # Exclude scenario_strengths - it's LLM-generated later, not part of scraping
+        return self.model_dump(mode="json", exclude={"scenario_strengths"})
 

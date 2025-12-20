@@ -105,12 +105,8 @@ class YachtScraper(BaseAgencyScraper):
                     agency.role_levels.extend(role_levels)
                     agency.role_levels = list(set(agency.role_levels))
                 
-                if page_name == "home":
-                    if self._detect_seamly_chatbot():
-                        agency.ai_capabilities.internal_ai_matching = True
-                        agency.ai_capabilities.chatbot_for_candidates = True
-                        agency.ai_capabilities.chatbot_for_clients = True
-                        self.logger.info(f"✓ Detected Seamly chatbot (API check) | Source: Seamly API")
+                # AI capabilities: Only set to True if explicitly stated on website
+                # Removed Seamly chatbot detection as per client feedback
                 
                 self.logger.info(f"✅ Completed: {page_name}")
                 
@@ -134,7 +130,7 @@ class YachtScraper(BaseAgencyScraper):
         
         
         
-        agency.evidence_urls = list(self.evidence_urls)
+        agency.evidence_urls = self.get_filtered_evidence_urls()
         agency.collected_at = self.collected_at
         
         self.logger.info("=" * 80)
@@ -400,7 +396,8 @@ class YachtScraper(BaseAgencyScraper):
                 data = json.loads(script.string)
                 email = data.get("email")
                 if email:
-                    agency.contact_email = email
+                    #agency.contact_email = email
+                    agency.contact_email = None
                     self.evidence_urls.append(url)
                     self.logger.info(f"✓ Email extracted from contactListing JSON: {email}")
                     return
@@ -424,34 +421,8 @@ class YachtScraper(BaseAgencyScraper):
         }
         return city_province_map.get(city, "Unknown")
     
-    def _detect_seamly_chatbot(self) -> bool:
-        """
-        Detect if Yacht has Seamly chatbot by checking the API endpoint.
-        
-        If the API returns 200, the chatbot is available.
-        API: https://api.seamly-app.com/channels/api/v2/client/71497efc-a8a4-4b75-a8bb-dc235090c652/translations/4/nl-informal.json
-        """
-        import requests
-        
-        seamly_api_url = "https://api.seamly-app.com/channels/api/v2/client/71497efc-a8a4-4b75-a8bb-dc235090c652/translations/4/nl-informal.json"
-        
-        try:
-            self.logger.info(f"Checking Seamly chatbot API: {seamly_api_url}")
-            response = requests.get(seamly_api_url, timeout=10)
-            
-            if response.status_code == 200:
-                self.logger.info(f"✓ Seamly chatbot API returned 200 - Chatbot is available")
-                # Add API URL to evidence
-                if seamly_api_url not in self.evidence_urls:
-                    self.evidence_urls.append(seamly_api_url)
-                return True
-            else:
-                self.logger.info(f"✗ Seamly chatbot API returned {response.status_code} - Chatbot not available")
-                return False
-                
-        except Exception as e:
-            self.logger.warning(f"Could not check Seamly chatbot API: {e}")
-            return False
+    # Removed _detect_seamly_chatbot method - chatbot detection removed per client feedback
+    # AI capabilities should only be set to True if explicitly stated on the website
 
 
 @dg.asset(group_name="agencies")

@@ -52,17 +52,7 @@ class HaysScraper(BaseAgencyScraper):
             "name": "terms",
             "url": "https://www.hays.nl/gebruiksvoorwaarden",
             "functions": ["legal"],
-        },
-        {
-            "name": "services",
-            "url": "https://www.hays.nl/al-onze-diensten",
-            "functions": [],
-        },
-        {
-            "name": "about",
-            "url": "https://www.hays.nl/over-hays",
-            "functions": [],
-        },
+        }
     ]
 
     def scrape(self) -> Agency:
@@ -71,7 +61,7 @@ class HaysScraper(BaseAgencyScraper):
         # Note: self.utils is now initialized in BaseAgencyScraper.__init__()
         agency = self.create_base_agency()
         agency.geo_focus_type = GeoFocusType.INTERNATIONAL
-        agency.employers_page_url = f"{self.WEBSITE_URL}/recruitment/contacteer-ons"
+        #agency.employers_page_url = f"{self.WEBSITE_URL}/recruitment/contacteer-ons"
         agency.contact_form_url = f"{self.WEBSITE_URL}/contact"
         
         # Add key URLs to evidence (avoid duplicates)
@@ -98,34 +88,30 @@ class HaysScraper(BaseAgencyScraper):
                 # Extract navigation links for portal detection (home page)
                 if page["name"] == "home":
                     self._extract_navigation_links(soup, agency, url)
-                    # Detect chatbot on home page
-                    self._detect_chatbot(soup, page_text, agency, url)
-                
-                # Portal detection on every page
-                if self.utils.detect_candidate_portal(soup, page_text, url):
-                    agency.digital_capabilities.candidate_portal = True
-                if self.utils.detect_client_portal(soup, page_text, url):
-                    agency.digital_capabilities.client_portal = True
+                    # AI capabilities: Only set to True if explicitly stated on website
+                    # Removed chatbot detection as per client feedback
                 
                 # Extract role levels on every page
-                role_levels = self.utils.fetch_role_levels(page_text, url)
-                if role_levels:
-                    if not agency.role_levels:
-                        agency.role_levels = []
-                    agency.role_levels.extend(role_levels)
-                    agency.role_levels = list(set(agency.role_levels))
+                # role_levels = self.utils.fetch_role_levels(page_text, url)
+                # if role_levels:
+                #     if not agency.role_levels:
+                #         agency.role_levels = []
+                #     agency.role_levels.extend(role_levels)
+                #     agency.role_levels = list(set(agency.role_levels))
                 
                 # Extract review sources
-                review_sources = self.utils.fetch_review_sources(soup, url)
-                if review_sources and not agency.review_sources:
-                    agency.review_sources = review_sources
+                # Review extraction removed per client requirement
+                # Reviews must be explicitly shown/linked on the website, not inferred
 
             except Exception as e:
                 self.logger.warning(f"Error scraping {url}: {e}")
 
-        # Extract from aggregated text
-        agency.focus_segments = self._extract_focus_segments(all_text)
-        agency.regions_served = self._extract_regions_served(all_text)
+        # Extract from aggregated text and normalize
+        from staffing_agency_scraper.lib.normalize import normalize_focus_segments, normalize_regions_served
+        focus_segments = self._extract_focus_segments(all_text)
+        agency.focus_segments = normalize_focus_segments(focus_segments)
+        regions = self._extract_regions_served(all_text)
+        agency.regions_served = normalize_regions_served(regions)
         
         # Set volume specialisation
         if "1,000 vacancies" in all_text or "80 consultants" in all_text:
@@ -143,11 +129,14 @@ class HaysScraper(BaseAgencyScraper):
         self.extract_all_common_fields(agency, all_text)
 
         # Update evidence URLs
-        agency.evidence_urls = list(self.evidence_urls)
+        # agency.evidence_urls = self.get_filtered_evidence_urls()
+        agency.evidence_urls = self.evidence_urls.copy()
         agency.collected_at = self.collected_at
 
         self.logger.info(f"Completed scrape of {self.AGENCY_NAME}")
-        
+        with open("all_text.txt", "w") as f:
+            f.write(all_text)
+
         return agency
 
     def _apply_functions(
@@ -243,7 +232,8 @@ class HaysScraper(BaseAgencyScraper):
                     agency.services.msp = True
                     self.logger.info(f"✓ Found service 'msp' | Source: {url}")
         
-        # Fallback to general text
+        # Fallback to general text - Only set common services, not enterprise services
+        # Enterprise services (MSP, RPO, executive_search) require explicit confirmation
         else:
             if "perm recruitment" in text_lower:
                 agency.services.werving_selectie = True
@@ -251,12 +241,7 @@ class HaysScraper(BaseAgencyScraper):
                 agency.services.detacheren = True
             if "contracting" in text_lower:
                 agency.services.zzp_bemiddeling = True
-            if "rpo" in text_lower:
-                agency.services.rpo = True
-            if "msp" in text_lower:
-                agency.services.msp = True
-            if "executive search" in text_lower:
-                agency.services.executive_search = True
+            # Note: MSP, RPO, executive_search are NOT set in fallback - require explicit confirmation
 
     def _extract_contact(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
         """Extract contact info from contact page."""
@@ -394,103 +379,6 @@ class HaysScraper(BaseAgencyScraper):
                     candidate_links.append((full_url, link_text))
                     self.logger.info(f"✓ Found candidate link: {link_text} → {full_url} | Source: {url}")
         
-        # Extract employer portal links from employer subnav
-        if employer_subnav:
-            for link in employer_subnav.find_all("a", href=True):
-                href = link.get("href", "")
-                link_text = link.get_text(strip=True).lower()
-                
-                # Employer-specific links
-                if any(keyword in href.lower() or keyword in link_text for keyword in [
-                    "recruitment", "vacature", "vacancy", "employer", "werkgever", "enterprise"
-                ]):
-                    full_url = href if href.startswith("http") else f"{self.WEBSITE_URL}{href}"
-                    employer_links.append((full_url, link_text))
-                    self.logger.info(f"✓ Found employer link: {link_text} → {full_url} | Source: {url}")
-        
-        # Detect candidate portal from links
-        if candidate_links:
-            # Check if any link indicates a real portal (not just a login page)
-            for link_url, link_text in candidate_links:
-                if "mijn-account" in link_url or "mijn account" in link_text:
-                    agency.digital_capabilities.candidate_portal = True
-                    if link_url not in self.evidence_urls:
-                        self.evidence_urls.append(link_url)
-                    self.logger.info(f"✓ Detected candidate_portal from: {link_text} | Source: {url}")
-                elif "login" in link_url or "aanmelden" in link_url:
-                    # Add to evidence but don't mark as portal yet (login page, not portal itself)
-                    if link_url not in self.evidence_urls:
-                        self.evidence_urls.append(link_url)
-        
-        # Detect client portal from links
-        if employer_links:
-            # Check if there's a specific employer portal (not just a contact/service page)
-            has_employer_keyword = False
-            has_portal_keyword = False
-            
-            for link_url, link_text in employer_links:
-                if any(kw in link_text or kw in link_url.lower() for kw in ["werkgever", "employer", "client"]):
-                    has_employer_keyword = True
-                if any(kw in link_text or kw in link_url.lower() for kw in ["portal", "login", "dashboard"]):
-                    has_portal_keyword = True
-                
-                # Add significant employer links to evidence
-                if "recruitment" in link_url or "enterprise" in link_url:
-                    if link_url not in self.evidence_urls:
-                        self.evidence_urls.append(link_url)
-            
-            # Only mark as client portal if we have BOTH indicators
-            # (Following the conservative approach from utils)
-            if has_employer_keyword and has_portal_keyword:
-                agency.digital_capabilities.client_portal = True
-                self.logger.info(f"✓ Detected client_portal from navigation | Source: {url}")
-    
-    def _detect_chatbot(self, soup: BeautifulSoup, page_text: str, agency: Agency, url: str) -> None:
-        """
-        Detect chatbot/live chat services on the website.
-        
-        Common chat services:
-        - Zopim (Zendesk Chat)
-        - LiveChat
-        - Intercom
-        - Drift
-        - Tawk.to
-        - Crisp
-        - HubSpot Chat
-        """
-        chatbot_indicators = [
-            # Zopim / Zendesk Chat
-            "zopim", "zendesk chat", "zendesk-chat",
-            # Other popular services
-            "livechat", "live-chat", "intercom", "drift", 
-            "tawk.to", "tawk", "crisp", "crisp.chat",
-            "hubspot chat", "hubspot-chat", "freshchat",
-            # Generic indicators
-            "live chat", "livechat", "chat widget", "chat-widget",
-            "chat service", "online chat"
-        ]
-        
-        # Check page HTML and text
-        html_str = str(soup).lower()
-        text_lower = page_text.lower()
-        
-        has_chatbot = False
-        detected_service = None
-        
-        for indicator in chatbot_indicators:
-            if indicator in html_str or indicator in text_lower:
-                has_chatbot = True
-                detected_service = indicator
-                break
-        
-        if has_chatbot:
-            # Mark chatbot as available for both candidates and clients
-            # (Most chat widgets serve both audiences)
-            agency.ai_capabilities.chatbot_for_candidates = True
-            agency.ai_capabilities.chatbot_for_clients = True
-            self.logger.info(f"✓ Detected chatbot service: '{detected_service}' | Source: {url}")
-            self.logger.info(f"  → chatbot_for_candidates: True")
-            self.logger.info(f"  → chatbot_for_clients: True")
 
     def _extract_focus_segments(self, text: str) -> list[str]:
         """Extract focus segments from text."""
@@ -521,12 +409,15 @@ class HaysScraper(BaseAgencyScraper):
             regions.append("landelijk")
             self.logger.info("✓ Found region: landelijk (Netherlands)")
         
-        if "worldwide" in text_lower or "international" in text_lower or "global" in text_lower:
-            regions.append("internationaal")
-            self.logger.info("✓ Found region: internationaal (Worldwide)")
+        # Note: International countries are filtered out by normalization
+        # Only "landelijk", "Randstad", and provinces are allowed
         
-        self.logger.info(f"Total regions found: {len(regions)}")
-        return regions
+        # Normalize regions_served to use only controlled labels
+        from staffing_agency_scraper.lib.normalize import normalize_regions_served
+        normalized = normalize_regions_served(regions)
+        
+        self.logger.info(f"Total regions found: {len(normalized)}")
+        return normalized
 
 
 @dg.asset(group_name="agencies")

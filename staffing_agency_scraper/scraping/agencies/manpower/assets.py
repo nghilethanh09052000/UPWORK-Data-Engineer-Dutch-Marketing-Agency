@@ -31,22 +31,12 @@ class ManpowerScraper(BaseAgencyScraper):
         {
             "name": "home",
             "url": "https://www.manpower.nl/nl",
-            "functions": ["logo", "sectors", "services"],
+            "functions": ["logo", "services"],
         },
         {
             "name": "hr_services",
             "url": "https://www.manpower.nl/nl/werkgevers/hr-services",
-            "functions": ["services", "sectors"],
-        },
-        {
-            "name": "employers",
-            "url": "https://www.manpower.nl/nl/manpower-business-professionals-voor-werkgevers",
             "functions": ["services"],
-        },
-        {
-            "name": "werkgevers",
-            "url": "https://www.manpower.nl/nl/werkgevers",
-            "functions": [],
         },
         {
             "name": "specialisaties",
@@ -59,16 +49,6 @@ class ManpowerScraper(BaseAgencyScraper):
             "functions": ["office_locations"],
         },
         {
-            "name": "contact",
-            "url": "https://www.manpower.nl/nl/over-manpower/contact",
-            "functions": ["contact"],
-        },
-        {
-            "name": "about",
-            "url": "https://www.manpower.nl/nl/over-manpower/ons-bedrijf",
-            "functions": [],
-        },
-        {
             "name": "privacy",
             "url": "https://www.manpower.nl/nl/privacy-statement",
             "functions": ["legal"],
@@ -77,11 +57,6 @@ class ManpowerScraper(BaseAgencyScraper):
             "name": "certifications",
             "url": "https://www.manpower.nl/nl/over-manpower/ons-bedrijf/certificeringen",
             "functions": ["certifications"],
-        },
-        {
-            "name": "manpowergroup_contact",
-            "url": "https://manpowergroup.nl/contact/",
-            "functions": ["legal"],
         },
         {
             "name": "vacatures_voor_jou",
@@ -96,14 +71,8 @@ class ManpowerScraper(BaseAgencyScraper):
         # Note: self.utils is now initialized in BaseAgencyScraper.__init__()
         agency = self.create_base_agency()
         agency.geo_focus_type = GeoFocusType.INTERNATIONAL
-        agency.employers_page_url = f"{self.WEBSITE_URL}/nl/manpower-business-professionals-voor-werkgevers"
+        agency.employers_page_url = f"{self.WEBSITE_URL}/nl/werkgevers"
         agency.contact_form_url = f"{self.WEBSITE_URL}/nl/over-manpower/contact"
-        
-        # Add key URLs to evidence (avoid duplicates)
-        if agency.employers_page_url not in self.evidence_urls:
-            self.evidence_urls.append(agency.employers_page_url)
-        if agency.contact_form_url not in self.evidence_urls:
-            self.evidence_urls.append(agency.contact_form_url)
         
 
         agency.volume_specialisation = VolumeSpecialisation.MASSA_50_PLUS  # Large-scale staffing
@@ -125,15 +94,8 @@ class ManpowerScraper(BaseAgencyScraper):
                 
                 # Extract navigation links for portal detection (home page)
                 if page["name"] == "home":
-                    self._extract_navigation_links(soup, agency, url)
                     # Detect mobile app
                     self._detect_mobile_app(soup, page_text, agency, url)
-                
-                # Portal detection on every page
-                if self.utils.detect_candidate_portal(soup, page_text, url):
-                    agency.digital_capabilities.candidate_portal = True
-                if self.utils.detect_client_portal(soup, page_text, url):
-                    agency.digital_capabilities.client_portal = True
                 
                 # Extract role levels on every page
                 role_levels = self.utils.fetch_role_levels(page_text, url)
@@ -144,15 +106,16 @@ class ManpowerScraper(BaseAgencyScraper):
                     agency.role_levels = list(set(agency.role_levels))
                 
                 # Extract review sources
-                review_sources = self.utils.fetch_review_sources(soup, url)
-                if review_sources and not agency.review_sources:
-                    agency.review_sources = review_sources
+                # Review extraction removed per client requirement
+                # Reviews must be explicitly shown/linked on the website, not inferred
             
             except Exception as e:
                 self.logger.warning(f"Error scraping {url}: {e}")
         
-        # Extract from aggregated text
-        agency.focus_segments = self._extract_focus_segments(all_text)
+        # Extract from aggregated text and normalize
+        from staffing_agency_scraper.lib.normalize import normalize_focus_segments
+        focus_segments = self._extract_focus_segments(all_text)
+        agency.focus_segments = normalize_focus_segments(focus_segments)
         
         # Extract certifications, CAO, membership
         agency.certifications = self.utils.fetch_certifications(all_text, "accumulated_text")
@@ -165,8 +128,40 @@ class ManpowerScraper(BaseAgencyScraper):
         # ========================================================================
         self.extract_all_common_fields(agency, all_text)
         
+        # Normalize sectors after extraction (they may have been set in the loop)
+        # Then filter sectors_secondary to remove any duplicates from sectors_core
+        from staffing_agency_scraper.lib.normalize import normalize_sectors
+        
+        if agency.sectors_core:
+            original_core = agency.sectors_core.copy()
+            agency.sectors_core = normalize_sectors(agency.sectors_core)
+            if agency.sectors_core != original_core:
+                self.logger.info(f"✓ Normalized sectors_core: {len(original_core)} -> {len(agency.sectors_core)} | Original: {original_core[:5]}... | Normalized: {agency.sectors_core[:5]}...")
+        
+        if agency.sectors_secondary:
+            original_secondary = agency.sectors_secondary.copy()
+            normalized_secondary = normalize_sectors(agency.sectors_secondary)
+            if normalized_secondary != original_secondary:
+                self.logger.info(f"✓ Normalized sectors_secondary: {len(original_secondary)} -> {len(normalized_secondary)} | Original: {original_secondary[:5]}... | Normalized: {normalized_secondary[:5]}...")
+            
+            # Filter: exclude any sectors that are already in sectors_core (case-insensitive comparison)
+            if agency.sectors_core:
+                sectors_core_lower = {s.lower() for s in agency.sectors_core}
+                sectors_secondary_filtered = [
+                    s for s in normalized_secondary 
+                    if s.lower() not in sectors_core_lower
+                ]
+                excluded_count = len(normalized_secondary) - len(sectors_secondary_filtered)
+                if excluded_count > 0:
+                    self.logger.info(f"✓ Filtered sectors_secondary: removed {excluded_count} duplicate(s) that are in sectors_core")
+                agency.sectors_secondary = sectors_secondary_filtered
+            else:
+                agency.sectors_secondary = normalized_secondary
+        
         # Update evidence URLs
-        agency.evidence_urls = list(self.evidence_urls)
+        # agency.evidence_urls = self.get_filtered_evidence_urls()
+        agency.volume_specialisation = None
+        agency.evidence_urls = self.evidence_urls.copy()
         agency.collected_at = self.collected_at
 
 
@@ -204,7 +199,10 @@ class ManpowerScraper(BaseAgencyScraper):
             elif func_name == "office_locations":
                 offices = self._extract_office_locations(soup, url)
                 if offices:
-                    agency.office_locations = offices
+                    # Limit to 10 offices per client requirement (already limited in _extract_office_locations)
+                    agency.office_locations = offices[:10]
+                    if len(offices) > 10:
+                        self.logger.info(f"✓ Limited office_locations to 10 (was {len(offices)}) | Source: {url}")
             
             elif func_name == "contact":
                 self._extract_contact(soup, page_text, agency, url)
@@ -263,42 +261,6 @@ class ManpowerScraper(BaseAgencyScraper):
         if logo_url:
             self.logger.info(f"✓ Found logo (fallback): {logo_url} | Source: {url}")
         return logo_url
-    
-    def _extract_navigation_links(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
-        """
-        Extract navigation links for portal detection.
-        
-        Looks for:
-        - Candidate portal: "My Manpower", "Mijn Manpower" login
-        - Client portal: "Voor werkgevers" portal links
-        """
-        # Find navigation areas
-        nav_main = soup.find("nav", class_="main-nav")
-        
-        candidate_links = []
-        employer_links = []
-        
-        # Look for "My Manpower" login indicator
-        login_sections = soup.find_all(class_=re.compile(r"login"))
-        for section in login_sections:
-            login_text = section.get_text(strip=True).lower()
-            if "my manpower" in login_text or "mijn manpower" in login_text:
-                agency.digital_capabilities.candidate_portal = True
-                self.logger.info(f"✓ Detected candidate_portal from: My Manpower login | Source: {url}")
-        
-        # Check navigation for employer portal links
-        if nav_main:
-            for link in nav_main.find_all("a", href=True):
-                href = link.get("href", "")
-                link_text = link.get_text(strip=True).lower()
-                
-                # Employer-specific links
-                if any(keyword in href.lower() or keyword in link_text for keyword in [
-                    "werkgevers", "employers", "vacature aanmelden", "hr-services"
-                ]):
-                    full_url = href if href.startswith("http") else f"{self.WEBSITE_URL}{href}"
-                    employer_links.append((full_url, link_text))
-                    self.logger.info(f"✓ Found employer link: {link_text} → {full_url} | Source: {url}")
     
     def _detect_mobile_app(self, soup: BeautifulSoup, page_text: str, agency: Agency, url: str) -> None:
         """
@@ -444,17 +406,15 @@ class ManpowerScraper(BaseAgencyScraper):
             # The contact page explicitly states: "Per e-mail: info@manpowergroup.nl"
             # Try multiple patterns to find it
             if any(phrase in page_text.lower() for phrase in ["info@manpowergroup.nl", "info&#64;manpowergroup", "marketing@manpowergroup"]):
-                agency.contact_email = "info@manpowergroup.nl"
+                agency.contact_email = None
                 self.logger.info(f"✓ Found contact email: {agency.contact_email} | Source: {url}")
             else:
-                # Fall back to utils method
-                email = self.utils.fetch_contact_email(page_text, url)
                 if email:
-                    agency.contact_email = email
+                    agency.contact_email = None
                     self.logger.info(f"✓ Found contact email (via utils): {agency.contact_email} | Source: {url}")
                 else:
                     # Hardcode based on known value from contact page
-                    agency.contact_email = "info@manpowergroup.nl"
+                    agency.contact_email = None
                     self.logger.info(f"✓ Set contact email (known): {agency.contact_email} | Source: {url}")
         
         if not agency.contact_phone:
@@ -475,11 +435,19 @@ class ManpowerScraper(BaseAgencyScraper):
         
         # Office locations
         if not agency.office_locations:
-            agency.office_locations = self.utils.fetch_office_locations(soup, url)
-            if agency.office_locations:
-                # First office is HQ
-                agency.hq_city = agency.office_locations[0].city
-                agency.hq_province = agency.office_locations[0].province
+            # Note: self.utils.fetch_office_locations doesn't exist, but keeping this for potential future use
+            # If office locations are set elsewhere, limit to 10
+            if hasattr(self.utils, 'fetch_office_locations'):
+                office_locs = self.utils.fetch_office_locations(soup, url)
+                if office_locs:
+                    # Limit to 10 offices per client requirement
+                    agency.office_locations = office_locs[:10]
+                    if len(office_locs) > 10:
+                        self.logger.info(f"✓ Limited office_locations to 10 (was {len(office_locs)}) | Source: {url}")
+                    # First office is HQ
+                    if agency.office_locations:
+                        agency.hq_city = agency.office_locations[0].city
+                        agency.hq_province = agency.office_locations[0].province
     
     def _extract_legal(self, page_text: str, agency: Agency, url: str) -> None:
         """
@@ -717,8 +685,16 @@ class ManpowerScraper(BaseAgencyScraper):
                     offices.append(office)
                     seen_cities.add(city_name_clean.lower())
                     self.logger.info(f"✓ Found office: {city_name_clean}, {province} | Source: {url}")
+                    
+                    # Limit to 10 offices per client requirement
+                    if len(offices) >= 10:
+                        self.logger.info(f"✓ Limited office locations to 10 (per client requirement) | Source: {url}")
+                        break
             
-            self.logger.info(f"Total offices found: {len(offices)}")
+            # Ensure we only return max 10 offices
+            offices = offices[:10]
+            
+            self.logger.info(f"Total offices found: {len(offices)} (limited to 10)")
             
         except json.JSONDecodeError as e:
             self.logger.error(f"Failed to parse JSON from {url}: {e}")

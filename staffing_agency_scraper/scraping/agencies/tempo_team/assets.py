@@ -99,8 +99,7 @@ class TempoTeamScraper(BaseAgencyScraper):
         },
     ]
     
-    # Chatbot API to check (not an HTML page)
-    CHATBOT_API_URL = "https://api.seamly-app.com/channels/api/v2/client/72ea2296-3cb3-4ad5-9dea-aa85ee1397cc/configs"
+    # Removed CHATBOT_API_URL - chatbot detection removed per client feedback
 
     def scrape(self) -> Agency:
         self.logger.info(f"Starting scrape of {self.AGENCY_NAME}")
@@ -109,7 +108,7 @@ class TempoTeamScraper(BaseAgencyScraper):
         self.utils = AgencyScraperUtils(logger=self.logger)
         agency = self.create_base_agency()
         agency.employers_page_url = f"{self.WEBSITE_URL}/werkgevers"
-        agency.contact_form_url = f"{self.WEBSITE_URL}/werkgevers/contact/contactformulier"
+        agency.contact_form_url = "https://www.tempo-team.nl/werkgevers/contact"
         
         # Add contact form URL to evidence (avoid duplicates)
         if agency.contact_form_url not in self.evidence_urls:
@@ -145,8 +144,8 @@ class TempoTeamScraper(BaseAgencyScraper):
         all_text = " ".join(page_texts.values())
         self.extract_all_common_fields(agency, all_text)
         
-        # Check for chatbot API
-        self._check_chatbot_api(agency)
+        # AI capabilities: Only set to True if explicitly stated on website
+        # Removed chatbot API check as per client feedback
         
         # Finalize
         if all_sectors:
@@ -155,13 +154,18 @@ class TempoTeamScraper(BaseAgencyScraper):
         if all_sectors_secondary:
             agency.sectors_secondary = sorted(list(all_sectors_secondary))
         
-        agency.evidence_urls = list(self.evidence_urls)
+        # agency.evidence_urls = self.get_filtered_evidence_urls()
+        agency.evidence_urls = self.evidence_urls.copy()
         agency.collected_at = self.collected_at
         
         self.logger.info("=" * 80)
         self.logger.info(f"✅ Completed scrape of {self.AGENCY_NAME}")
         self.logger.info(f"📄 Evidence URLs: {len(agency.evidence_urls)}")
         self.logger.info("=" * 80)
+
+
+        with open('all_text.txt', 'w') as f:
+            f.write(all_text)
         
         return agency
     
@@ -277,10 +281,6 @@ class TempoTeamScraper(BaseAgencyScraper):
             # Check for English language support
             english_links = soup.find_all('a', href=re.compile(r'/english/', re.IGNORECASE))
             if english_links:
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                if 'meertalig' not in agency.growth_signals:
-                    agency.growth_signals.append('meertalig')
                 self.logger.info(f"✓ Multi-language support detected (English) | Source: {url}")
         
         except Exception as e:
@@ -347,11 +347,6 @@ class TempoTeamScraper(BaseAgencyScraper):
             
             found_social = [platform for platform, link in social_links.items() if link]
             if found_social:
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                signal = f"actief_op_{len(found_social)}_social_media_platforms"
-                if signal not in agency.growth_signals:
-                    agency.growth_signals.append(signal)
                 self.logger.info(f"✓ Social media: {', '.join(found_social)} | Source: {url}")
         
         except Exception as e:
@@ -464,8 +459,15 @@ class TempoTeamScraper(BaseAgencyScraper):
             # Pattern: "Phone: 020 569 59 22" or "Telefoon: 020 569 59 22"
             phone_match = re.search(r'(?:Phone|Telefoon)[:\s]+(\+?\d{2,3}[\s\-]?\d{3}[\s\-]?\d{2}[\s\-]?\d{2})', article_text, re.IGNORECASE)
             if phone_match:
-                agency.contact_phone = phone_match.group(1).strip().replace('-', ' ')
-                self.logger.info(f"✓ Contact phone: {agency.contact_phone} | Source: {url}")
+                raw_phone = phone_match.group(1).strip().replace('-', ' ')
+                # Normalize phone to digits-only format
+                from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                normalized_phone = normalize_contact_phone(raw_phone)
+                agency.contact_phone = normalized_phone
+                if normalized_phone != raw_phone:
+                    self.logger.info(f"✓ Contact phone: {raw_phone} -> normalized to: {normalized_phone} | Source: {url}")
+                else:
+                    self.logger.info(f"✓ Contact phone: {normalized_phone} | Source: {url}")
             
             # Extract HQ address
             # Pattern: "Tempo-Team\nDiemermere 25\n1112 TC Diemen"
@@ -540,22 +542,12 @@ class TempoTeamScraper(BaseAgencyScraper):
             # Extract founding year
             founding_match = re.search(r'25\s+maart\s+1969|March\s+25,?\s+1969', article_text, re.IGNORECASE)
             if founding_match:
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                signal = "sinds_1969_actief"
-                if signal not in agency.growth_signals:
-                    agency.growth_signals.append(signal)
-                self.logger.info(f"✓ Founding year: 1969 → {signal} | Source: {url}")
+                self.logger.info(f"✓ Founding year: 1969 | Source: {url}")
             
             # Confirm brand group (Randstad acquisition in 1983)
             randstad_match = re.search(r'Randstad.*(?:takes over|neemt.*over).*Tempo-Team.*1983', article_text, re.IGNORECASE)
             if randstad_match:
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                signal = "onderdeel_van_randstad_sinds_1983"
-                if signal not in agency.growth_signals:
-                    agency.growth_signals.append(signal)
-                self.logger.info(f"✓ Brand group confirmed: Randstad (since 1983) → {signal} | Source: {url}")
+                self.logger.info(f"✓ Brand group confirmed: Randstad (since 1983) | Source: {url}")
             
             # Extract market position
             market_position_match = re.search(
@@ -564,12 +556,7 @@ class TempoTeamScraper(BaseAgencyScraper):
                 re.IGNORECASE
             )
             if market_position_match:
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                signal = "tweede_grootste_uitzendbureau_nl"
-                if signal not in agency.growth_signals:
-                    agency.growth_signals.append(signal)
-                self.logger.info(f"✓ Market position: Second largest in NL → {signal} | Source: {url}")
+                self.logger.info(f"✓ Market position: Second largest in NL | Source: {url}")
             
             # Extract international expansion
             countries = []
@@ -583,22 +570,12 @@ class TempoTeamScraper(BaseAgencyScraper):
                 countries.append("Germany")
             
             if countries:
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                signal = f"internationaal_actief_{len(countries)}_landen"
-                if signal not in agency.growth_signals:
-                    agency.growth_signals.append(signal)
-                self.logger.info(f"✓ International expansion: {', '.join(countries)} → {signal} | Source: {url}")
+                self.logger.info(f"✓ International expansion: {', '.join(countries)} | Source: {url}")
             
             # Extract Vedior integration (2007)
             vedior_match = re.search(r'Vedior.*(?:2007|2008)', article_text, re.IGNORECASE)
             if vedior_match:
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                signal = "vedior_integratie_2007"
-                if signal not in agency.growth_signals:
-                    agency.growth_signals.append(signal)
-                self.logger.info(f"✓ Vedior integration (2007-2008) → {signal} | Source: {url}")
+                self.logger.info(f"✓ Vedior integration (2007-2008) | Source: {url}")
         
         except Exception as e:
             self.logger.error(f"❌ Error extracting history: {e}")
@@ -625,42 +602,22 @@ class TempoTeamScraper(BaseAgencyScraper):
             # Extract experience years
             experience_match = re.search(r'50\s+(?:jaar|years?).*(?:ervaring|experience)', article_text, re.IGNORECASE)
             if experience_match:
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                signal = "50_jaar_ervaring"
-                if signal not in agency.growth_signals:
-                    agency.growth_signals.append(signal)
-                self.logger.info(f"✓ Experience: 50 years → {signal} | Source: {url}")
+                self.logger.info(f"✓ Experience: 50 years | Source: {url}")
             
             # Extract labor market experts
             experts_match = re.search(r'honderden\s+arbeidsmarkt-experts|hundreds.*(?:labor|labour)\s+market\s+experts', article_text, re.IGNORECASE)
             if experts_match:
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                signal = "honderden_arbeidsmarkt_experts"
-                if signal not in agency.growth_signals:
-                    agency.growth_signals.append(signal)
-                self.logger.info(f"✓ Labor market experts: Hundreds → {signal} | Source: {url}")
+                self.logger.info(f"✓ Labor market experts: Hundreds | Source: {url}")
             
             # Extract "digitally driven" value proposition
             digital_match = re.search(r'digitaal\s+gedreven|digital(?:ly)?\s+driven', article_text, re.IGNORECASE)
             if digital_match:
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                signal = "digitaal_gedreven"
-                if signal not in agency.growth_signals:
-                    agency.growth_signals.append(signal)
-                self.logger.info(f"✓ Value proposition: Digitally driven → {signal} | Source: {url}")
+                self.logger.info(f"✓ Value proposition: Digitally driven | Source: {url}")
             
             # Extract "personal attention" value proposition
             personal_match = re.search(r'persoonlijke\s+aandacht|personal\s+attention', article_text, re.IGNORECASE)
             if personal_match:
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                signal = "persoonlijke_aandacht"
-                if signal not in agency.growth_signals:
-                    agency.growth_signals.append(signal)
-                self.logger.info(f"✓ Value proposition: Personal attention → {signal} | Source: {url}")
+                self.logger.info(f"✓ Value proposition: Personal attention | Source: {url}")
         
         except Exception as e:
             self.logger.error(f"❌ Error extracting mission: {e}")
@@ -691,6 +648,11 @@ class TempoTeamScraper(BaseAgencyScraper):
             
             offices_added = 0
             for card in office_cards:
+                # Limit to 10 representative office locations
+                if offices_added >= 10:
+                    self.logger.info(f"Reached limit of 10 offices, stopping extraction | Source: {url}")
+                    break
+                
                 try:
                     # Extract city name from h2
                     city_elem = card.find('h2', class_='card__header')
@@ -714,6 +676,12 @@ class TempoTeamScraper(BaseAgencyScraper):
                         elif item.find('use', href=re.compile(r'#marker')):
                             street = item_text
                     
+                    # Normalize phone number if found
+                    normalized_phone = None
+                    if phone:
+                        from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                        normalized_phone = normalize_contact_phone(phone)
+                    
                     # Get province from city
                     province = self.utils.map_city_to_province(city)
                     
@@ -726,7 +694,8 @@ class TempoTeamScraper(BaseAgencyScraper):
                     if not office_exists:
                         office = OfficeLocation(
                             city=city,
-                            province=province
+                            province=province,
+                            phone=normalized_phone
                         )
                         agency.office_locations.append(office)
                         offices_added += 1
@@ -735,8 +704,11 @@ class TempoTeamScraper(BaseAgencyScraper):
                         log_msg = f"✓ Office: {city}"
                         if province:
                             log_msg += f" ({province})"
-                        if phone:
-                            log_msg += f", Phone: {phone}"
+                        if normalized_phone:
+                            if normalized_phone != phone:
+                                log_msg += f", Phone: {phone} -> normalized to: {normalized_phone}"
+                            else:
+                                log_msg += f", Phone: {normalized_phone}"
                         if street:
                             log_msg += f", Address: {street}"
                         self.logger.info(f"{log_msg} | Source: {url}")
@@ -745,16 +717,16 @@ class TempoTeamScraper(BaseAgencyScraper):
                     self.logger.warning(f"⚠ Error extracting office card: {e}")
                     continue
             
-            self.logger.info(f"✅ Extracted {offices_added} office locations | Source: {url}")
+            # Safety check: limit to 10 offices if somehow more were added
+            if agency.office_locations and len(agency.office_locations) > 10:
+                original_count = len(agency.office_locations)
+                agency.office_locations = agency.office_locations[:10]
+                self.logger.info(f"Limited office locations to 10 (was {original_count}) | Source: {url}")
             
-            # Add national coverage signal if we have many offices
-            if len(agency.office_locations) >= 30:
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                signal = f"landelijke_dekking_{len(agency.office_locations)}_vestigingen"
-                if signal not in agency.growth_signals:
-                    agency.growth_signals.append(signal)
-                    self.logger.info(f"✓ Growth signal: {signal} | Source: {url}")
+            self.logger.info(f"✅ Extracted {len(agency.office_locations)} office locations (limited to 10) | Source: {url}")
+            
+            # Removed assumption: "30+ offices = landelijke_dekking"
+            # Only set if explicitly stated in text, not inferred from office count
         
         except Exception as e:
             self.logger.error(f"❌ Error extracting offices: {e}")
@@ -781,7 +753,7 @@ class TempoTeamScraper(BaseAgencyScraper):
                     if 'lookingforajob' in href.lower():
                         # Extract email from href (handle both mailto: and http:// formats)
                         email = href.replace('mailto:', '').replace('http://', '').replace('https://', '').strip()
-                        agency.contact_email = email
+                        agency.contact_email = None
                         self.logger.info(f"✓ Main recruitment email (EU-flex): {email} | Source: {url}")
                         break
                 
@@ -791,21 +763,16 @@ class TempoTeamScraper(BaseAgencyScraper):
                         href = link.get('href', '')
                         if href.startswith('mailto:'):
                             email = href.replace('mailto:', '').strip()
-                            agency.contact_email = email
+                            agency.contact_email = None
                             self.logger.info(f"✓ Contact email: {email} | Source: {url}")
                             break
                 
-                # Extract EU-flex service as growth signal
+                # Extract EU-flex service
                 article = soup.find('article')
                 if article:
                     article_text = article.get_text(separator=" ", strip=True)
                     if re.search(r'EU[-\s]?flex|housing.*work|jobs with housing', article_text, re.IGNORECASE):
-                        if not agency.growth_signals:
-                            agency.growth_signals = []
-                        signal = "eu_flex_dienst_huisvesting_en_werk"
-                        if signal not in agency.growth_signals:
-                            agency.growth_signals.append(signal)
-                            self.logger.info(f"✓ EU-flex service (housing + jobs) → {signal} | Source: {url}")
+                        self.logger.info(f"✓ EU-flex service (housing + jobs) | Source: {url}")
         
         except Exception as e:
             self.logger.error(f"❌ Error extracting email: {e}")
@@ -1039,41 +1006,22 @@ class TempoTeamScraper(BaseAgencyScraper):
                     
                     self.logger.info(f"✓ Services mapped: {detected} | Source: {url}")
                 
-                # Add growth signals for additional services
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                
                 # Check for advanced HR services
                 text_lower = combined_text.lower()
                 if "performance management" in text_lower or "performance coaching" in text_lower:
-                    signal = "performance_management_diensten"
-                    if signal not in agency.growth_signals:
-                        agency.growth_signals.append(signal)
-                        self.logger.info(f"✓ Advanced service: performance management | Source: {url}")
+                    self.logger.info(f"✓ Advanced service: performance management | Source: {url}")
                 
                 if "poolmanagement" in text_lower or "pool management" in text_lower:
-                    signal = "poolmanagement_dienst"
-                    if signal not in agency.growth_signals:
-                        agency.growth_signals.append(signal)
-                        self.logger.info(f"✓ Advanced service: poolmanagement | Source: {url}")
+                    self.logger.info(f"✓ Advanced service: poolmanagement | Source: {url}")
                 
                 if "participatie" in text_lower or "participation" in text_lower:
-                    signal = "participatie_dienst"
-                    if signal not in agency.growth_signals:
-                        agency.growth_signals.append(signal)
-                        self.logger.info(f"✓ Social responsibility service: participatie | Source: {url}")
+                    self.logger.info(f"✓ Social responsibility service: participatie | Source: {url}")
                 
                 if "inhouse" in text_lower:
-                    signal = "inhouse_services"
-                    if signal not in agency.growth_signals:
-                        agency.growth_signals.append(signal)
-                        self.logger.info(f"✓ Advanced service: inhouse services | Source: {url}")
+                    self.logger.info(f"✓ Advanced service: inhouse services | Source: {url}")
                 
                 if "consultancy" in text_lower:
-                    signal = "hr_consultancy"
-                    if signal not in agency.growth_signals:
-                        agency.growth_signals.append(signal)
-                        self.logger.info(f"✓ Advisory service: HR consultancy | Source: {url}")
+                    self.logger.info(f"✓ Advisory service: HR consultancy | Source: {url}")
         
         except Exception as e:
             self.logger.error(f"❌ Error extracting services: {e}")
@@ -1113,11 +1061,11 @@ class TempoTeamScraper(BaseAgencyScraper):
                 agency.omrekenfactor_min = min_factor
                 agency.omrekenfactor_max = max_factor
                 
-                # Calculate average markup factor
-                avg_factor = (min_factor + max_factor) / 2
-                agency.avg_markup_factor = round(avg_factor, 2)
+                # Do NOT calculate average - client feedback: avoid inference
+                # Only extract what's explicitly stated (min/max)
+                # agency.avg_markup_factor should only be set if explicitly stated on website
                 
-                self.logger.info(f"✓ Omrekenfactor range: {min_factor} - {max_factor} (avg: {avg_factor:.2f}) | Source: {url}")
+                self.logger.info(f"✓ Omrekenfactor range: {min_factor} - {max_factor} | Source: {url}")
             
             # Extract recruitment fee percentage
             # Pattern: "gemiddeld rond de 25% liggen"
@@ -1128,12 +1076,6 @@ class TempoTeamScraper(BaseAgencyScraper):
             )
             if recruitment_fee_match:
                 fee_pct = int(recruitment_fee_match.group(1))
-                # Store as a string hint for now (could be added to model later)
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                signal = f"werving_selectie_fee_{fee_pct}_procent"
-                if signal not in agency.growth_signals:
-                    agency.growth_signals.append(signal)
                 self.logger.info(f"✓ Recruitment fee: ~{fee_pct}% | Source: {url}")
             
             # Check for no cure no pay
@@ -1147,16 +1089,16 @@ class TempoTeamScraper(BaseAgencyScraper):
                 agency.pricing_transparency = "public_examples"
                 self.logger.info(f"✓ Pricing transparency: public_examples (calculation examples shown) | Source: {url}")
             
-            # Extract response time: "binnen 24 uur"
+            # Extract response time: "binnen X dagen" (only if explicitly in days)
+            # Do NOT calculate conversions (hours to days) - client feedback: avoid all calculations
             response_match = re.search(
-                r'binnen\s+(\d+)\s+uur',
+                r'binnen\s+(\d+)\s+dag',
                 page_text.lower()
             )
             if response_match:
-                hours = int(response_match.group(1))
-                days = max(1, hours // 24)  # Convert to days
+                days = int(response_match.group(1))
                 agency.avg_time_to_fill_days = days
-                self.logger.info(f"✓ Response time: binnen {hours} uur ({days} day) | Source: {url}")
+                self.logger.info(f"✓ Response time (exact, no calculation): binnen {days} dagen | Source: {url}")
             
             # Extract example hourly rates from calculations
             # Pattern: "= 35,64 (per gewerkt uur)" or "= € 37,13 per gewerkt uur"
@@ -1183,68 +1125,8 @@ class TempoTeamScraper(BaseAgencyScraper):
             import traceback
             self.logger.error(f"   Traceback: {traceback.format_exc()}")
     
-    def _check_chatbot_api(self, agency: Agency) -> None:
-        """
-        Check if the chatbot API is accessible.
-        If it returns 200 OK, set chatbot and API flags to True.
-        """
-        try:
-            self.logger.info(f"🔍 Checking chatbot API: {self.CHATBOT_API_URL}")
-            
-            import requests
-            
-            # Headers from the actual chatbot API request
-            headers = {
-                "accept": "*/*",
-                "accept-encoding": "gzip, deflate, br, zstd",
-                "accept-language": "en-US,en;q=0.9",
-                "authorization": "Bearer EvVDvdtFawpjZo2iG/QGGZOf1QLwqpiiv+wXnrojLGSuHVPQHmV55brLzVIFszxBCCxNv5Ey4zytaIr8sR5JCg==",
-                "origin": "https://www.tempo-team.nl",
-                "referer": "https://www.tempo-team.nl/",
-                "sec-ch-ua": '"Microsoft Edge";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
-                "sec-ch-ua-mobile": "?0",
-                "sec-ch-ua-platform": '"macOS"',
-                "sec-fetch-dest": "empty",
-                "sec-fetch-mode": "cors",
-                "sec-fetch-site": "cross-site",
-                "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0"
-            }
-            
-            response = requests.get(self.CHATBOT_API_URL, headers=headers, timeout=10)
-            
-            self.logger.info(f"   API Status Code: {response.status_code}")
-            
-            if response.status_code == 200:
-                self.logger.info(f"✅ Chatbot API is accessible (200 OK)")
-                
-                # Initialize digital_capabilities if None
-                if not agency.digital_capabilities:
-                    agency.digital_capabilities = DigitalCapabilities()
-                
-                # Set API availability
-                agency.digital_capabilities.api_available = True
-                self.logger.info(f"✓ Set api_available = True")
-                
-                # Initialize ai_capabilities if None
-                if not agency.ai_capabilities:
-                    agency.ai_capabilities = AICapabilities()
-                
-                # Set chatbot flags
-                agency.ai_capabilities.internal_ai_matching = True
-                agency.ai_capabilities.chatbot_for_candidates = True
-                agency.ai_capabilities.chatbot_for_clients = True
-                
-                self.logger.info(f"✓ Set chatbot_for_candidates = True")
-                self.logger.info(f"✓ Set chatbot_for_clients = True")
-                
-                # Add to evidence URLs (avoid duplicates)
-                if self.CHATBOT_API_URL not in self.evidence_urls:
-                    self.evidence_urls.append(self.CHATBOT_API_URL)
-            else:
-                self.logger.info(f"⚠ Chatbot API not accessible (status {response.status_code})")
-        
-        except Exception as e:
-            self.logger.warning(f"⚠ Could not check chatbot API: {e}")
+    # Removed _check_chatbot_api method - chatbot detection removed per client feedback
+    # AI capabilities should only be set to True if explicitly stated on the website
 
 
 @dg.asset(group_name="agencies")

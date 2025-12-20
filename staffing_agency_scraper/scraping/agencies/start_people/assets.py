@@ -54,11 +54,6 @@ class StartPeopleScraper(BaseAgencyScraper):
             "functions": ['offices_paginated'],
         },
         {
-            "name": "internal_jobs",
-            "url": "https://startpeople.nl/ik-zoek-werk/werken-bij-start-people",
-            "functions": ['internal_jobs_filter'],
-        },
-        {
             "name": "privacy",
             "url": "https://startpeople.nl/legal/privacy-statement",
             "functions": ['legal_info'],
@@ -73,7 +68,7 @@ class StartPeopleScraper(BaseAgencyScraper):
         agency = self.create_base_agency()
         # geo_focus_type will be extracted from over-ons page
         agency.employers_page_url = f"{self.WEBSITE_URL}/werkgevers"
-        agency.contact_form_url = f"{self.WEBSITE_URL}/werkgevers/vacature-aanmelden"
+        agency.contact_form_url = f"{self.WEBSITE_URL}/contact"
         
         all_sectors = set()
         page_texts = {}  # Store page texts for common field extraction
@@ -110,13 +105,26 @@ class StartPeopleScraper(BaseAgencyScraper):
         if all_sectors:
             agency.sectors_core = sorted(list(all_sectors))
         
-        agency.evidence_urls = list(self.evidence_urls)
+        # Filter evidence URLs: exclude privacy statement page
+        agency.evidence_urls = self._filter_start_people_evidence_urls()
         agency.collected_at = self.collected_at
+        
+        # Final normalization: ensure contact_phone is normalized
+        from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+        if agency.contact_phone:
+            original_phone = agency.contact_phone
+            agency.contact_phone = normalize_contact_phone(agency.contact_phone)
+            if agency.contact_phone != original_phone:
+                self.logger.info(f"✓ Final normalization: contact_phone {original_phone} -> {agency.contact_phone}")
         
         self.logger.info("=" * 80)
         self.logger.info(f"✅ Completed scrape of {self.AGENCY_NAME}")
         self.logger.info(f"📄 Evidence URLs: {len(agency.evidence_urls)}")
         self.logger.info("=" * 80)
+
+
+        with open('all_text.txt', 'w') as f:
+            f.write(all_text)
         
         return agency
     
@@ -167,9 +175,6 @@ class StartPeopleScraper(BaseAgencyScraper):
             elif func_name == "offices_paginated":
                 self._extract_offices_paginated(agency, url)
             
-            elif func_name == "internal_jobs_filter":
-                self._extract_internal_jobs_filter(soup, agency, url)
-            
     
     def _extract_header(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
         """
@@ -197,27 +202,35 @@ class StartPeopleScraper(BaseAgencyScraper):
         lang_select = header.find("select", id=lambda x: x and "LanguageSelector" in x)
         if lang_select:
             languages = [opt.get("value") for opt in lang_select.find_all("option") if opt.get("value")]
-            if len(languages) >= 3:  # Multi-language if 3+ languages
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                if "meertalig" not in agency.growth_signals:
-                    agency.growth_signals.append("meertalig")
-                self.logger.info(f"✓ Found {len(languages)} languages: {', '.join(languages)} | Source: {url}")
+            # Removed threshold assumption (>= 3) - only set if explicitly stated
+            # Multi-language support should be explicitly mentioned, not inferred from language count
+            if languages:
+                self.logger.info(f"✓ Found {len(languages)} languages: {', '.join(languages)} (explicitly listed) | Source: {url}")
         
-        # Detect portals from login menu
-        login_menu = header.find("div", id="login-menu")
+        # Detect portals from login menu (can be in header or anywhere on page)
+        # The login menu has id="login-menu" and contains portal links
+        login_menu = soup.find("div", id="login-menu")
+        if not login_menu:
+            # Also try to find it in header specifically
+            login_menu = header.find("div", id="login-menu")
+        
         if login_menu:
-            # Candidate portal
-            candidate_link = login_menu.find("a", href=lambda x: x and "mijn-start-people" in x.lower())
-            if candidate_link:
-                agency.digital_capabilities.candidate_portal = True
-                self.logger.info(f"✓ Found candidate portal: MijnStartPeople | Source: {url}")
+            # Find all links in the login menu
+            all_links = login_menu.find_all("a")
             
-            # Employer portal
-            employer_link = login_menu.find("a", href=lambda x: x and "mijnstartpeople" in x.lower() and "werkgevers" in x.lower())
-            if employer_link:
-                agency.digital_capabilities.client_portal = True
-                self.logger.info(f"✓ Found employer portal: mijnstartpeople | Source: {url}")
+            for link in all_links:
+                href = link.get("href", "").lower()
+                link_text = link.get_text(strip=True).lower()
+                
+                # Candidate portal: link to "mijn-start-people" or text contains "flexmedewerker"
+                if ("mijn-start-people" in href or "flexmedewerker" in link_text) and "werkgevers" not in href:
+                    agency.digital_capabilities.candidate_portal = True
+                    self.logger.info(f"✓ Found candidate portal: {link.get_text(strip=True)} ({href}) | Source: {url}")
+                
+                # Client portal: link to "mijnstartpeople" with "werkgevers" or text contains "opdrachtgever"
+                elif ("mijnstartpeople" in href and "werkgevers" in href) or "opdrachtgever" in link_text:
+                    agency.digital_capabilities.client_portal = True
+                    self.logger.info(f"✓ Found client portal: {link.get_text(strip=True)} ({href}) | Source: {url}")
     
     def _extract_footer(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
         """
@@ -264,12 +277,13 @@ class StartPeopleScraper(BaseAgencyScraper):
                 if employer_name and employer_name not in top_employers and len(employer_name) > 2:
                     top_employers.append(employer_name)
         
-        if top_employers and len(top_employers) >= 3:
+        # Removed threshold assumption (>= 3) - only set if explicitly listed
+        if top_employers:
             if not agency.growth_signals:
                 agency.growth_signals = []
             if "werkt_met_fortune500_klanten" not in agency.growth_signals:
                 agency.growth_signals.append("werkt_met_fortune500_klanten")
-            self.logger.info(f"✓ Found {len(top_employers)} top employers: {', '.join(top_employers[:5])}... | Source: {url}")
+            self.logger.info(f"✓ Found {len(top_employers)} top employers: {', '.join(top_employers[:5])}... (explicitly listed) | Source: {url}")
     
     def _extract_services(self, soup: BeautifulSoup, page_text: str, agency: Agency, url: str) -> None:
         """
@@ -522,120 +536,96 @@ class StartPeopleScraper(BaseAgencyScraper):
     
     def _extract_offices_paginated(self, agency: Agency, base_url: str) -> None:
         """
-        Extract all office locations from paginated vestigingen pages.
-        Iterates through pages 1-8.
-        Deduplicates offices based on city + postcode combination.
+        Extract representative office locations from vestigingen page (first page only, limited to 10).
         """
-        all_offices = []
-        seen_offices = set()  # Track unique offices by (city, postcode) tuple
+        self.logger.info(f"🔍 Fetching offices from: {base_url}")
         
-        for page_num in range(1, 9):  # Pages 1 through 8
-            if page_num == 1:
-                url = base_url
-            else:
-                url = f"{base_url}?page={page_num}"
+        try:
+            soup = self.fetch_page(base_url)
             
-            try:
-                self.logger.info(f"🔍 Fetching offices from page {page_num}: {url}")
-                soup = self.fetch_page(url)
-                
-                # Find all office cards in the list
-                office_list = soup.find("ul", {"data-insights-index": "prd_start_people_office"})
-                if not office_list:
-                    self.logger.info(f"No office list found on page {page_num}, stopping pagination")
-                    break
-                
-                office_cards = office_list.find_all("li", class_=lambda x: x and "border-gradient" in x)
-                
-                if not office_cards:
-                    self.logger.info(f"No office cards found on page {page_num}, stopping pagination")
-                    break
-                
-                offices_on_page = 0
-                duplicates_on_page = 0
-                for card in office_cards:
-                    try:
-                        # Extract office name
-                        h3 = card.find("h3")
-                        if not h3:
-                            continue
-                        
-                        office_name = h3.get_text(strip=True)
-                        
-                        # Extract address
-                        address_div = card.find("div", class_="flex gap-3 mb-4")
-                        if not address_div:
-                            continue
-                        
-                        address_text = address_div.get_text(separator=" ", strip=True)
-                        
-                        # Parse address (format: "Street Number PostCode City")
-                        # Example: "P.J. Oudweg 61 1314 CK Almere"
-                        address_match = re.search(r'Bezoekadres\s+(.+?)\s+(\d{4}\s+[A-Z]{2})\s+(.+)', address_text)
-                        if address_match:
-                            street = address_match.group(1).strip()
-                            postcode = address_match.group(2).strip()
-                            city = address_match.group(3).strip()
-                        else:
-                            # Fallback: try to extract city from the last part
-                            parts = address_text.split()
-                            if len(parts) >= 2:
-                                city = parts[-1]
-                                street = " ".join(parts[:-3]) if len(parts) > 3 else ""
-                                postcode = " ".join(parts[-3:-1]) if len(parts) > 3 else ""
-                            else:
-                                continue
-                        
-                        # Create unique identifier for deduplication
-                        office_key = (city.lower().strip(), postcode.strip() if postcode else "")
-                        
-                        # Skip if we've already seen this office
-                        if office_key in seen_offices:
-                            duplicates_on_page += 1
-                            continue
-                        
-                        # Mark as seen
-                        seen_offices.add(office_key)
-                        
-                        # Extract phone
-                        phone_link = card.find("a", href=lambda x: x and "tel:" in x)
-                        phone = phone_link.get("href").replace("tel:", "").strip() if phone_link else None
-                        
-                        # Map city to province
-                        province = self.utils.map_city_to_province(city)
-                        
-                        office = OfficeLocation(
-                            city=city,
-                            province=province,
-                            street=street if street else None,
-                            postcode=postcode if postcode else None,
-                            phone=phone
-                        )
-                        
-                        all_offices.append(office)
-                        offices_on_page += 1
-                        
-                    except Exception as e:
-                        self.logger.warning(f"Error parsing office card: {e}")
+            # Find all office cards in the list
+            office_list = soup.find("ul", {"data-insights-index": "prd_start_people_office"})
+            if not office_list:
+                self.logger.warning(f"No office list found on {base_url}")
+                return
+            
+            office_cards = office_list.find_all("li", class_=lambda x: x and "border-gradient" in x)
+            
+            if not office_cards:
+                self.logger.warning(f"No office cards found on {base_url}")
+                return
+            
+            all_offices = []
+            
+            # Limit to 10 representative offices
+            for card in office_cards[:10]:
+                try:
+                    # Extract office name
+                    h3 = card.find("h3")
+                    if not h3:
                         continue
-                
-                if duplicates_on_page > 0:
-                    self.logger.info(f"✓ Extracted {offices_on_page} new offices from page {page_num} ({duplicates_on_page} duplicates skipped)")
-                else:
-                    self.logger.info(f"✓ Extracted {offices_on_page} offices from page {page_num}")
-                
-            except Exception as e:
-                self.logger.error(f"Error fetching page {page_num}: {e}")
-                continue
-        
-        if all_offices:
-            agency.office_locations = all_offices
-            self.logger.info(f"✅ Total unique offices extracted: {len(all_offices)} (deduplicated)")
+                    
+                    office_name = h3.get_text(strip=True)
+                    
+                    # Extract address
+                    address_div = card.find("div", class_="flex gap-3 mb-4")
+                    if not address_div:
+                        continue
+                    
+                    address_text = address_div.get_text(separator=" ", strip=True)
+                    
+                    # Parse address (format: "Street Number PostCode City")
+                    # Example: "P.J. Oudweg 61 1314 CK Almere"
+                    address_match = re.search(r'Bezoekadres\s+(.+?)\s+(\d{4}\s+[A-Z]{2})\s+(.+)', address_text)
+                    if address_match:
+                        street = address_match.group(1).strip()
+                        postcode = address_match.group(2).strip()
+                        city = address_match.group(3).strip()
+                    else:
+                        # Fallback: try to extract city from the last part
+                        parts = address_text.split()
+                        if len(parts) >= 2:
+                            city = parts[-1]
+                            street = " ".join(parts[:-3]) if len(parts) > 3 else ""
+                            postcode = " ".join(parts[-3:-1]) if len(parts) > 3 else ""
+                        else:
+                            continue
+                    
+                    # Extract phone
+                    phone_link = card.find("a", href=lambda x: x and "tel:" in x)
+                    phone = phone_link.get("href").replace("tel:", "").strip() if phone_link else None
+                    
+                    # Normalize phone if present
+                    if phone:
+                        from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                        phone = normalize_contact_phone(phone)
+                    
+                    # Map city to province
+                    province = self.utils.map_city_to_province(city)
+                    
+                    office = OfficeLocation(
+                        city=city,
+                        province=province,
+                        street=street if street else None,
+                        postcode=postcode if postcode else None,
+                        phone=phone
+                    )
+                    
+                    all_offices.append(office)
+                    self.logger.info(f"✓ Found office: {city}, {province} | Source: {base_url}")
+                    
+                except Exception as e:
+                    self.logger.warning(f"Error parsing office card: {e}")
+                    continue
             
-            # Set HQ from first office if not already set
-            if all_offices and not agency.hq_city:
-                agency.hq_city = all_offices[0].city
-                agency.hq_province = all_offices[0].province
+            if all_offices:
+                agency.office_locations = all_offices
+                self.logger.info(f"✅ Extracted {len(all_offices)} representative offices (limited to 10) | Source: {base_url}")
+            else:
+                self.logger.warning(f"No offices extracted from {base_url}")
+                
+        except Exception as e:
+            self.logger.error(f"Error fetching offices from {base_url}: {e}")
     
     def _extract_legal_info(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
         """
@@ -753,10 +743,19 @@ class StartPeopleScraper(BaseAgencyScraper):
                     break
             
             # Extract HQ address
-            # Pattern: "head office at P.J. Oudweg 61 in (1314 CK) Almere"
+            # Patterns for both English and Dutch formats:
+            # English: "head office at P.J. Oudweg 61 in (1314 CK) Almere"
+            # Dutch: "hoofdkantoor aan de P.J. Oudweg 61 te (1314 CK) Almere"
+            # Dutch: "hebben hun hoofdkantoor aan de P.J. Oudweg 61 te (1314 CK) Almere"
             hq_patterns = [
+                # English format
                 r'head office at\s+(.+?)\s+in\s+\((\d{4}\s+[A-Z]{2})\)\s+([A-Za-z]+)',
-                r'P\.?J\.?\s*Oudweg\s+61[^,\n]{0,30}?\(1314\s+CK\)\s+Almere',
+                # Dutch format: "hebben hun hoofdkantoor aan de ... te (postcode) city"
+                r'hebben\s+hun\s+hoofdkantoor\s+aan\s+(?:de\s+)?(.+?)\s+te\s+\((\d{4}\s+[A-Z]{2})\)\s+([A-Za-z]+)',
+                # Dutch format: "hoofdkantoor aan de ... te (postcode) city"
+                r'hoofdkantoor\s+(?:aan de|aan)\s+(.+?)\s+te\s+\((\d{4}\s+[A-Z]{2})\)\s+([A-Za-z]+)',
+                # Fallback: direct match for P.J. Oudweg 61 pattern
+                r'P\.?J\.?\s*Oudweg\s+61[^,\n]{0,50}?\((\d{4}\s+[A-Z]{2})\)\s+([A-Za-z]+)',
             ]
             for pattern in hq_patterns:
                 hq_match = re.search(pattern, pdf_text, re.IGNORECASE)
@@ -766,6 +765,11 @@ class StartPeopleScraper(BaseAgencyScraper):
                         hq_street = hq_match.group(1).strip()
                         hq_zip = hq_match.group(2).strip()
                         hq_city = hq_match.group(3).strip()
+                    elif len(hq_match.groups()) >= 2:
+                        # Fallback pattern matched (P.J. Oudweg 61)
+                        hq_street = "P.J. Oudweg 61"
+                        hq_zip = hq_match.group(1).strip()
+                        hq_city = hq_match.group(2).strip()
                     else:
                         # Simple pattern matched, use defaults
                         hq_street = "P.J. Oudweg 61"
@@ -798,10 +802,15 @@ class StartPeopleScraper(BaseAgencyScraper):
             for pattern in phone_patterns:
                 phone_match = re.search(pattern, pdf_text, re.IGNORECASE)
                 if phone_match:
-                    agency.contact_phone = phone_match.group(1).strip()
-                    # Normalize phone format (remove extra spaces, keep structure)
-                    agency.contact_phone = re.sub(r'\s+', ' ', agency.contact_phone)
-                    self.logger.info(f"✓ Found contact phone: {agency.contact_phone} | Source: {pdf_url}")
+                    phone = phone_match.group(1).strip()
+                    # Normalize phone to digits-only format (with + for international)
+                    from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                    normalized_phone = normalize_contact_phone(phone)
+                    agency.contact_phone = normalized_phone
+                    if normalized_phone != phone:
+                        self.logger.info(f"✓ Found contact phone: {phone} -> normalized to: {normalized_phone} | Source: {pdf_url}")
+                    else:
+                        self.logger.info(f"✓ Found contact phone: {normalized_phone} | Source: {pdf_url}")
                     break
             
             # If still not found, try a more aggressive search
@@ -810,10 +819,14 @@ class StartPeopleScraper(BaseAgencyScraper):
                 generic_phone_match = re.search(r'\+31[\s\(\)0-9]{10,20}', pdf_text)
                 if generic_phone_match:
                     phone = generic_phone_match.group(0).strip()
-                    # Clean it up
-                    phone = re.sub(r'\s+', ' ', phone)
-                    agency.contact_phone = phone
-                    self.logger.info(f"✓ Found contact phone (generic match): {agency.contact_phone} | Source: {pdf_url}")
+                    # Normalize phone to digits-only format (with + for international)
+                    from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                    normalized_phone = normalize_contact_phone(phone)
+                    agency.contact_phone = normalized_phone
+                    if normalized_phone != phone:
+                        self.logger.info(f"✓ Found contact phone (generic match): {phone} -> normalized to: {normalized_phone} | Source: {pdf_url}")
+                    else:
+                        self.logger.info(f"✓ Found contact phone (generic match): {normalized_phone} | Source: {pdf_url}")
             
             # Extract KvK number (Chamber of Commerce number)
             # Pattern: "Trade Register number" or "KvK" or "Chamber of Commerce number"
@@ -857,95 +870,32 @@ class StartPeopleScraper(BaseAgencyScraper):
             import traceback
             self.logger.error(f"   Traceback: {traceback.format_exc()}")
     
-    def _extract_internal_jobs_filter(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
+    def _filter_start_people_evidence_urls(self) -> list[str]:
         """
-        Extract data from internal jobs page Algolia search JSON:
-        - Role levels from employmentLevel facet (Professional/Experienced, Starter, Student)
-        - National coverage confirmation from province facet
-        - Function groups from functionGroup facet
-        - Additional sectors from branch facet
-        
-        Note: The page uses Algolia search with embedded JSON data in __searchConfig
+        Filter evidence URLs for Start People: exclude privacy statement page.
+        Keep the PDF URL if it was added, but exclude the HTML privacy statement page.
         """
-        try:
-            self.logger.info(f"📊 Extracting internal jobs filter data from: {url}")
-            import json
-            
-            # Find the script tag with __searchConfig
-            search_config = None
-            for script in soup.find_all('script'):
-                script_text = script.string or ''
-                if '__searchConfig' in script_text:
-                    # Extract the JSON object
-                    match = re.search(r'const __searchConfig = ({.*?});', script_text, re.DOTALL)
-                    if match:
-                        json_str = match.group(1)
-                        search_config = json.loads(json_str)
-                        break
-            
-            if not search_config or 'searchResponse' not in search_config:
-                self.logger.warning(f"⚠ No Algolia search config found | Source: {url}")
-                return
-            
-            facets = search_config.get('searchResponse', {}).get('facets', {})
-            if not facets:
-                self.logger.warning(f"⚠ No facets found in search config | Source: {url}")
-                return
-            
-            self.logger.info(f"   Found {len(facets)} facet categories")
-            
-            # Extract role levels from employmentLevel facet
-            # Use the ROLE_LEVEL_KEYWORDS from utils to intelligently map filter values to standard categories
-            if 'employmentLevel' in facets:
-                employment_levels = facets['employmentLevel']
-                self.logger.info(f"   Found {len(employment_levels)} role level options")
-                
-                if not agency.role_levels:
-                    agency.role_levels = []
-                
-                # Import ROLE_LEVEL_KEYWORDS from utils
-                from staffing_agency_scraper.scraping.utils import ROLE_LEVEL_KEYWORDS
-                
-                # Loop through each employment level from the filter
-                for level, count in employment_levels.items():
-                    level_lower = level.lower()
-                    
-                    # Check which standard role level category this matches
-                    matched_categories = []
-                    for role_category, keywords in ROLE_LEVEL_KEYWORDS.items():
-                        for keyword in keywords:
-                            if keyword.lower() in level_lower:
-                                matched_categories.append(role_category)
-                                break  # Only need one keyword match per category
-                    
-                    # Add matched categories to role_levels
-                    if matched_categories:
-                        for category in matched_categories:
-                            if category not in agency.role_levels:
-                                agency.role_levels.append(category)
-                        
-                        matched_str = ', '.join(matched_categories)
-                        self.logger.info(f"✓ Role level: '{level}' ({count}) → {matched_str} | Source: {url}")
-                    else:
-                        # Log if no match found
-                        self.logger.info(f"   Role level: '{level}' ({count}) - no keyword match")
-            
-            # Confirm national coverage from province facet
-            if 'province' in facets:
-                provinces = facets['province']
-                self.logger.info(f"   Found {len(provinces)} provinces")
-                
-                if len(provinces) >= 5:  # If 5+ provinces, it's national
-                    if not agency.geo_focus_type:
-                        agency.geo_focus_type = GeoFocusType.NATIONAL
-                    province_list = ', '.join([f"{p.title()}({c})" for p, c in list(provinces.items())[:9]])
-                    self.logger.info(f"✓ Confirmed national coverage: {len(provinces)} provinces | Source: {url}")
-                    self.logger.info(f"   {province_list}")
+        from urllib.parse import urlparse
         
-        except Exception as e:
-            self.logger.error(f"❌ Error extracting internal jobs filter data: {e}")
-            import traceback
-            self.logger.error(f"   Traceback: {traceback.format_exc()}")
+        filtered = []
+        privacy_statement_url = "https://startpeople.nl/legal/privacy-statement"
+        
+        for url in self.evidence_urls:
+            # Normalize URL for comparison
+            parsed = urlparse(url)
+            normalized = f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip('/')
+            privacy_normalized = urlparse(privacy_statement_url)
+            privacy_normalized_str = f"{privacy_normalized.scheme}://{privacy_normalized.netloc}{privacy_normalized.path}".rstrip('/')
+            
+            # Exclude privacy statement HTML page
+            if normalized.lower() == privacy_normalized_str.lower():
+                self.logger.info(f"  Excluded privacy statement page: {url}")
+                continue
+            
+            filtered.append(url)
+        
+        return filtered
+    
 
 
 @dg.asset(group_name="agencies")

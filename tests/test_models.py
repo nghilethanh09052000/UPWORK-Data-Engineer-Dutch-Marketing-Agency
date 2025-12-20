@@ -41,7 +41,7 @@ def test_agency_with_services():
     assert agency.services.uitzenden is True
     assert agency.services.detacheren is True
     assert agency.services.werving_selectie is True
-    assert agency.services.payrolling is False  # Default
+    assert agency.services.payrolling is None  # Default is None (null), not False
 
 
 def test_agency_with_locations():
@@ -87,5 +87,5 @@ def test_digital_capabilities():
 
     assert caps.client_portal is True
     assert caps.mobile_app is True
-    assert caps.api_available is False  # Default
+    assert caps.api_available is None  # Default is None (null), not False
 

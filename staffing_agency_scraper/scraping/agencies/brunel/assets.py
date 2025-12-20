@@ -47,7 +47,7 @@ class BrunelScraper(BaseAgencyScraper):
         all_text = ""
         all_sectors = set()
         office_urls = []  # Will be populated from contact page
-        has_chatbot = False  # Track if chatbot is found in __NEXT_DATA__
+        # Removed has_chatbot tracking - chatbot detection removed per client feedback
 
         for url in self.PAGES_TO_SCRAPE:
             try:
@@ -55,9 +55,8 @@ class BrunelScraper(BaseAgencyScraper):
                 page_text = soup.get_text(separator=" ", strip=True)
                 all_text += " " + page_text
                 
-                # Check for chatbot in __NEXT_DATA__
-                if not has_chatbot:
-                    has_chatbot = self._check_chatbot_in_next_data(soup, url)
+                # AI capabilities: Only set to True if explicitly stated on website
+                # Removed chatbot detection from __NEXT_DATA__ as per client feedback
 
                 # Extract logo from main page (use utils for PNG/SVG filtering and banner exclusion)
                 if url == self.WEBSITE_URL and not agency.logo_url:
@@ -76,10 +75,6 @@ class BrunelScraper(BaseAgencyScraper):
                 if url == self.WEBSITE_URL:
                     sectors = self._extract_sectors_from_homepage(soup, url)
                     all_sectors.update(sectors)
-                    
-                    # Add normalized sectors from utils
-                    norm_sectors = self.utils.fetch_sectors(page_text, url)
-                    all_sectors.update(norm_sectors)
                     
                     # Also extract HQ from main page if mentioned
                     if "amsterdam" in page_text.lower():
@@ -116,9 +111,7 @@ class BrunelScraper(BaseAgencyScraper):
 
                 # Extract sectors and services from voor-opdrachtgevers page
                 if "voor-opdrachtgevers" in url.lower():
-                    sectors = self._extract_sectors_from_opdrachtgevers(soup, url)
-                    all_sectors.update(sectors)
-                    
+                   
                     # Extract services from this page (merge all fields)
                     services = self._extract_services(soup, url)
                     if services.detacheren:
@@ -187,9 +180,8 @@ class BrunelScraper(BaseAgencyScraper):
                     agency.role_levels = list(set(agency.role_levels))
                 
                 # Extract review sources
-                review_sources = self.utils.fetch_review_sources(soup, url)
-                if review_sources and not agency.review_sources:
-                    agency.review_sources = review_sources
+                # Review extraction removed per client requirement
+                # Reviews must be explicitly shown/linked on the website, not inferred
 
                 # Extract HQ info from privacy page
                 if "privacy" in url.lower():
@@ -233,16 +225,19 @@ class BrunelScraper(BaseAgencyScraper):
                 # Use HQ (first/Amsterdam) data for main contact
                 if office_data.get("phone") and not agency.contact_phone:
                     agency.contact_phone = office_data["phone"]
-                if office_data.get("email") and not agency.contact_email:
-                    agency.contact_email = office_data["email"]
+                # if office_data.get("email") and not agency.contact_email:
+                #     agency.contact_email = office_data["email"]
+
+                agency.contact_email = None
                     
             except Exception as e:
                 self.logger.warning(f"Error scraping office {office_url}: {e}")
 
-        # Set sectors_core from combined set
+        # Set sectors_core from combined set and normalize
         if all_sectors:
-            agency.sectors_core = sorted(list(all_sectors))
-            self.logger.info(f"✓ Total unique sectors: {len(agency.sectors_core)}")
+            from staffing_agency_scraper.lib.normalize import normalize_sectors
+            agency.sectors_core = normalize_sectors(sorted(list(all_sectors)))
+            self.logger.info(f"✓ Total unique sectors (normalized): {len(agency.sectors_core)}")
 
         # Derive CAO type and membership from certifications
         if agency.certifications:
@@ -253,26 +248,28 @@ class BrunelScraper(BaseAgencyScraper):
                 agency.cao_type = CaoType.NBBU
                 agency.membership = ["NBBU"]
 
-        # Derive regions_served from office locations
-        if agency.office_locations and len(agency.office_locations) >= 3:
-            agency.regions_served = ["landelijk"]
+        # Regions served: Only set if explicitly stated in text
+        # Removed assumption: "3+ offices = landelijk" - this is an assumption, not explicit
+        # Use standard extraction from text only
         
-        # Check for international presence in text
-        if "internationaal" in all_text.lower() or "worldwide" in all_text.lower():
-            if "landelijk" not in agency.regions_served:
-                agency.regions_served.append("landelijk")
-            agency.regions_served.append("internationaal")
+        # Normalize regions_served to use only controlled labels
+        from staffing_agency_scraper.lib.normalize import normalize_regions_served
+        agency.regions_served = normalize_regions_served(agency.regions_served)
 
         # Extract focus segments from text
-        agency.focus_segments = self._extract_focus_segments(all_text)
+        focus_segments = self._extract_focus_segments(all_text)
+        # Normalize focus segments to use controlled vocabulary
+        from staffing_agency_scraper.lib.normalize import normalize_focus_segments
+        agency.focus_segments = normalize_focus_segments(focus_segments)
 
         # Extract digital capabilities from text (preserve portal values set by utils)
         digital_caps = self._extract_digital_capabilities(all_text)
         # Only update mobile_app (portals already set by utils.detect_*_portal)
         agency.digital_capabilities.mobile_app = digital_caps.mobile_app
 
-        # Extract AI capabilities from __NEXT_DATA__ and text
-        agency.ai_capabilities = self._extract_ai_capabilities(all_text, has_chatbot)
+        # AI capabilities: Only set to True if explicitly stated on website
+        # Removed inference-based detection - all AI capabilities default to None
+        agency.ai_capabilities = AICapabilities()  # All fields default to None
         
         # ========================================================================
         # Extract ALL common fields using base class utility method! 🚀
@@ -280,8 +277,8 @@ class BrunelScraper(BaseAgencyScraper):
         # ========================================================================
         self.extract_all_common_fields(agency, all_text)
 
-        # Update evidence URLs
-        agency.evidence_urls = self.evidence_urls.copy()
+        # Filter evidence URLs - exclude all contact URLs except Amsterdam
+        agency.evidence_urls = self._filter_brunel_evidence_urls()
         agency.collected_at = self.collected_at
 
         # Log extraction summary
@@ -296,6 +293,10 @@ class BrunelScraper(BaseAgencyScraper):
         self.logger.info(f"  Certifications: {len(agency.certifications or [])} found")
 
         self.logger.info(f"Completed scrape of {self.AGENCY_NAME}")
+        
+        with open("all_text.txt", "w") as f:
+            f.write(all_text)
+        
         return agency
 
     def _extract_logo(self, soup: BeautifulSoup) -> str | None:
@@ -422,120 +423,134 @@ class BrunelScraper(BaseAgencyScraper):
         """
         Extract sectors from the homepage cards container.
         
-        HTML structure:
-        <div id="cards-container">
-            <a href="/nl-nl/carriere/engineering">
-                <p class="text-m-body-medium...">Engineering</p>
-            </a>
-            ...
-        </div>
+        Finds <a> tags with href containing /carriere/ or /communities/ and extracts
+        the sector name from the <p> element inside the link.
+        
+        Expected sectors: Engineering, Legal, IT en Telecom, Finance en Risk, Digital Marketing
         """
         sectors = []
         seen = set()
 
-        # Find the cards container
-        cards_container = soup.find("div", id="cards-container")
-        if not cards_container:
-            # Fallback: look for career links
-            cards_container = soup
-
-        # Find all career/expertise links
-        career_links = cards_container.find_all("a", href=lambda h: h and ("/carriere/" in h or "/communities/" in h))
+        # Find all career/expertise links (simpler: search entire page for links with href pattern)
+        career_links = soup.find_all("a", href=lambda h: h and ("/carriere/" in h or "/communities/" in h))
+        
+        self.logger.info(f"   Found {len(career_links)} career/community links")
 
         for link in career_links:
             # Extract sector name from <p> element inside the link
             p = link.find("p")
             if p:
-                sector = p.get_text(strip=True).lower()
-                if sector and sector not in seen:
-                    sectors.append(sector)
-                    seen.add(sector)
-                    self.logger.info(f"✓ Found sector '{sector}' | Source: {url}")
+                sector_text = p.get_text(strip=True)
+            else:
+                # Fallback: extract from link text if no <p> found
+                sector_text = link.get_text(strip=True)
+            
+            if sector_text:
+                # Normalize the sector name using fetch_sectors (searches for keywords)
+                normalized_sectors = self.utils.fetch_sectors(sector_text, url)
+                if normalized_sectors:
+                    for normalized_sector in normalized_sectors:
+                        if normalized_sector not in seen:
+                            sectors.append(normalized_sector)
+                            seen.add(normalized_sector)
+                            self.logger.info(f"✓ Found sector: '{sector_text}' → '{normalized_sector}' | Source: {url}")
+                else:
+                    # If no normalization found, log it but don't add (to avoid non-standard sectors)
+                    self.logger.info(f"   Sector '{sector_text}' not normalized (not in standard list) | Source: {url}")
 
+        self.logger.info(f"✅ Extracted {len(sectors)} unique sectors from homepage | Source: {url}")
         return sectors
 
     def _extract_services(self, soup: BeautifulSoup, url: str) -> AgencyServices:
         """
-        Extract services from page text.
+        Extract services from page text - only if explicitly mentioned in services context.
         
-        Mapping from page content to service fields:
-        - "detachering", "detacheren" → detacheren
-        - "werving", "selectie", "recruitment" → werving_selectie
-        - "interim" → zzp_bemiddeling
-        - "uitzenden", "uitzendwerk" → uitzenden
-        - "payroll" → payrolling
-        - "outsourcing" → msp
-        - "consultancy", "advies" → rpo (when related to recruitment process)
-        - "executive search" → executive_search
-        - "traineeship", "opleiding", "training" → opleiden_ontwikkelen
-        - "inhouse" → inhouse_services
+        Rule: Only match services if they appear in a services/diensten context, not just anywhere.
+        This prevents false positives from generic mentions.
+        
+        Returns AgencyServices with None for unknown services (not False).
         """
-        text_lower = soup.get_text(separator=" ", strip=True).lower()
+        import re
+        
+        page_text = soup.get_text(separator=" ", strip=True)
+        text_lower = page_text.lower()
+        
+        # Find services context - look for "diensten", "services", "ons aanbod", etc.
+        # Extract a context window around these keywords (1500 chars before/after)
+        services_context = text_lower
+        diensten_match = re.search(r'(?:diensten|services|ons aanbod|wat wij bieden|onze diensten)(.{0,1500})', text_lower, re.DOTALL | re.IGNORECASE)
+        if diensten_match:
+            services_context = diensten_match.group(1)
+            self.logger.info(f"   Found services context on page | Source: {url}")
+        else:
+            # If no explicit services section found, use full text but be more cautious
+            services_context = text_lower
+        
+        # Initialize all services as None (unknown, not False)
+        detacheren = None
+        werving_selectie = None
+        executive_search = None
+        zzp_bemiddeling = None
+        opleiden_ontwikkelen = None
+        uitzenden = None
+        payrolling = None
+        msp = None
+        rpo = None
+        inhouse_services = None
 
-        detacheren = False
-        werving_selectie = False
-        executive_search = False
-        zzp_bemiddeling = False
-        opleiden_ontwikkelen = False
-        uitzenden = False
-        payrolling = False
-        msp = False
-        rpo = False
-        inhouse_services = False
-
-        # Detachering
-        if "detachering" in text_lower or "detacheren" in text_lower:
+        # Detachering - explicit keywords in services context
+        if any(phrase in services_context for phrase in ["detachering", "detacheren", "detachering diensten"]):
             detacheren = True
-            self.logger.info(f"✓ Found service 'detacheren' | Source: {url}")
+            self.logger.info(f"✓ Found service 'detacheren' (in services context) | Source: {url}")
 
-        # Werving & Selectie / Recruitment
-        if "werving" in text_lower and "selectie" in text_lower:
+        # Werving & Selectie - require both words together or explicit phrase
+        if any(phrase in services_context for phrase in ["werving en selectie", "werving & selectie", "werving en selectie diensten"]):
             werving_selectie = True
-            self.logger.info(f"✓ Found service 'werving_selectie' | Source: {url}")
-
-        if "recruitment" in text_lower:
+            self.logger.info(f"✓ Found service 'werving_selectie' (explicit phrase) | Source: {url}")
+        elif "recruitment" in services_context and ("diensten" in services_context or "services" in services_context):
+            # Only match "recruitment" if it's clearly in a services context
             werving_selectie = True
-            self.logger.info(f"✓ Found service 'werving_selectie' (recruitment) | Source: {url}")
+            self.logger.info(f"✓ Found service 'werving_selectie' (recruitment in services context) | Source: {url}")
 
-        # Interim / ZZP bemiddeling
-        if "interim" in text_lower:
+        # Interim / ZZP bemiddeling - require explicit mention
+        if any(phrase in services_context for phrase in ["interim", "interim diensten", "zzp bemiddeling", "freelance bemiddeling"]):
             zzp_bemiddeling = True
-            self.logger.info(f"✓ Found service 'zzp_bemiddeling' (interim) | Source: {url}")
+            self.logger.info(f"✓ Found service 'zzp_bemiddeling' (explicit mention) | Source: {url}")
 
-        # Uitzenden
-        if "uitzenden" in text_lower or "uitzendwerk" in text_lower:
+        # Uitzenden - explicit keywords
+        if any(phrase in services_context for phrase in ["uitzenden", "uitzendwerk", "uitzend diensten", "flexibel personeel"]):
             uitzenden = True
-            self.logger.info(f"✓ Found service 'uitzenden' | Source: {url}")
+            self.logger.info(f"✓ Found service 'uitzenden' (explicit mention) | Source: {url}")
 
-        # Payrolling
-        if "payroll" in text_lower:
+        # Payrolling - explicit keyword
+        if "payroll" in services_context or "payrolling" in services_context:
             payrolling = True
-            self.logger.info(f"✓ Found service 'payrolling' | Source: {url}")
+            self.logger.info(f"✓ Found service 'payrolling' (explicit mention) | Source: {url}")
 
-        # Outsourcing / MSP
-        if "outsourcing" in text_lower:
+        # MSP - Require explicit confirmation (not just "outsourcing")
+        if any(phrase in services_context for phrase in ["msp", "managed service provider", "managed services", "msp diensten"]):
             msp = True
-            self.logger.info(f"✓ Found service 'msp' (outsourcing) | Source: {url}")
+            self.logger.info(f"✓ Found service 'msp' (explicit confirmation) | Source: {url}")
 
-        # Consultancy
-        if "consultancy" in text_lower or "adviestraject" in text_lower:
+        # RPO - Require explicit confirmation (not just "consultancy")
+        if any(phrase in services_context for phrase in ["rpo", "recruitment process outsourcing", "wervingsuitbesteding", "rpo diensten"]):
             rpo = True
-            self.logger.info(f"✓ Found service 'rpo' (consultancy/advies) | Source: {url}")
+            self.logger.info(f"✓ Found service 'rpo' (explicit confirmation) | Source: {url}")
 
-        # Executive Search
-        if "executive search" in text_lower:
+        # Executive Search - Require explicit confirmation
+        if any(phrase in services_context for phrase in ["executive search", "executive recruitment", "executive search diensten"]):
             executive_search = True
-            self.logger.info(f"✓ Found service 'executive_search' | Source: {url}")
+            self.logger.info(f"✓ Found service 'executive_search' (explicit confirmation) | Source: {url}")
 
-        # Opleiden / Training
-        if "traineeship" in text_lower or "opleiding" in text_lower or "training" in text_lower:
+        # Opleiden / Training - require explicit mention in services context
+        if any(phrase in services_context for phrase in ["traineeship", "opleiding en ontwikkeling", "training en ontwikkeling", "opleiden en ontwikkelen"]):
             opleiden_ontwikkelen = True
-            self.logger.info(f"✓ Found service 'opleiden_ontwikkelen' | Source: {url}")
+            self.logger.info(f"✓ Found service 'opleiden_ontwikkelen' (explicit mention) | Source: {url}")
 
-        # Inhouse services
-        if "inhouse" in text_lower or "in-house" in text_lower:
+        # Inhouse services - require explicit mention
+        if any(phrase in services_context for phrase in ["inhouse", "in-house", "inhouse diensten", "on-site services"]):
             inhouse_services = True
-            self.logger.info(f"✓ Found service 'inhouse_services' | Source: {url}")
+            self.logger.info(f"✓ Found service 'inhouse_services' (explicit mention) | Source: {url}")
 
         return AgencyServices(
             detacheren=detacheren,
@@ -548,6 +563,8 @@ class BrunelScraper(BaseAgencyScraper):
             msp=msp,
             rpo=rpo,
             inhouse_services=inhouse_services,
+            vacaturebemiddeling_only=None,  # Unknown unless explicitly stated
+            reintegratie_outplacement=None,  # Unknown unless explicitly stated
         )
 
     def _extract_offices_from_contact(self, soup: BeautifulSoup, url: str) -> tuple[list[OfficeLocation], list[str]]:
@@ -883,9 +900,9 @@ class BrunelScraper(BaseAgencyScraper):
         """Extract digital capabilities from text."""
         text_lower = text.lower()
 
-        candidate_portal = False
-        client_portal = False
-        mobile_app = False
+        candidate_portal = None
+        client_portal = None
+        mobile_app = None
 
         if "mijn brunel" in text_lower or "portal" in text_lower or "inloggen" in text_lower:
             candidate_portal = True
@@ -905,74 +922,73 @@ class BrunelScraper(BaseAgencyScraper):
             mobile_app=mobile_app,
         )
 
-    def _check_chatbot_in_next_data(self, soup: BeautifulSoup, url: str) -> bool:
-        """
-        Check if chatbot component exists in __NEXT_DATA__.
-        
-        Looks for patterns like:
-        - "componentName": "Chatbot"
-        - "chatbotUrl": "..."
-        - "chatbotWidgetId": "..."
-        """
-        script_tag = soup.find("script", id="__NEXT_DATA__")
-        if script_tag and script_tag.string:
-            json_str = script_tag.string
-            
-            # Use regex to find chatbot-related patterns
-            chatbot_patterns = [
-                r'"componentName"\s*:\s*"Chatbot"',
-                r'"chatbotUrl"\s*:\s*"[^"]+"',
-                r'"chatbotWidgetId"\s*:\s*"[^"]+"',
-                r'"chatbotSettingsId"\s*:\s*"[^"]+"',
-            ]
-            
-            for pattern in chatbot_patterns:
-                if re.search(pattern, json_str, re.IGNORECASE):
-                    self.logger.info(f"✓ Found chatbot in __NEXT_DATA__ | Source: {url}")
-                    return True
-        
-        return False
+    # Removed _check_chatbot_in_next_data and _extract_ai_capabilities methods
+    # AI capabilities should only be set to True if explicitly stated on the website
+    # All inference-based detection removed per client feedback
 
-    def _extract_ai_capabilities(self, text: str, has_chatbot: bool = False) -> AICapabilities:
+    def _filter_brunel_evidence_urls(self) -> list[str]:
         """
-        Extract AI capabilities from text and __NEXT_DATA__.
+        Filter evidence URLs to exclude all contact URLs except Amsterdam and login pages.
         
-        Checks for:
-        - chatbot_for_candidates: Chatbot component in __NEXT_DATA__ (available on main page)
-        - chatbot_for_clients: Same chatbot serves both candidates and clients
+        Excludes:
+        - All contact URLs matching /contact/ pattern (except Amsterdam)
+        - Login/user-specific pages: /myapplications/login, /login, /inloggen, etc.
+        - Keeps only: https://www.brunel.net/nl-nl/contact/amsterdam
+        
+        Returns
+        -------
+        list[str]
+            Filtered list of evidence URLs
         """
-        text_lower = text.lower()
+        from urllib.parse import urlparse
         
-        # Chatbot is on main page - available for both candidates and clients
-        chatbot_for_candidates = has_chatbot
-        chatbot_for_clients = has_chatbot  # Same chatbot serves everyone
-        internal_ai_matching = False
-        ai_screening = False
+        # The only contact URL to keep
+        keep_contact_url = "https://www.brunel.net/nl-nl/contact/amsterdam"
         
-        # Check for AI matching keywords
-        ai_keywords = ["ai matching", "ai-matching", "machine learning", "kunstmatige intelligentie", "artificial intelligence"]
-        for keyword in ai_keywords:
-            if keyword in text_lower:
-                internal_ai_matching = True
-                self.logger.info(f"✓ Found AI capability: internal_ai_matching (keyword: '{keyword}')")
-                break
+        # Normalize URLs for comparison
+        keep_contact_normalized = keep_contact_url.rstrip('/')
         
-        # Check for AI screening
-        if "ai screening" in text_lower or "automatische screening" in text_lower:
-            ai_screening = True
-            self.logger.info("✓ Found AI capability: ai_screening")
+        # Login/user-specific URL patterns to exclude
+        exclude_login_patterns = [
+            "/myapplications/login",
+            "/login",
+            "/inloggen",
+            "/mijn-",
+            "/account",
+            "/portal",
+        ]
         
-        if chatbot_for_candidates:
-            self.logger.info("✓ Found AI capability: chatbot_for_candidates")
-        if chatbot_for_clients:
-            self.logger.info("✓ Found AI capability: chatbot_for_clients")
+        filtered = []
+        for url in self.evidence_urls:
+            if not url:
+                continue
+            
+            # Normalize URL for comparison
+            url_normalized = url.rstrip('/')
+            url_lower = url_normalized.lower()
+            
+            # Exclude login/user-specific pages
+            should_exclude = False
+            for pattern in exclude_login_patterns:
+                if pattern in url_lower:
+                    should_exclude = True
+                    break
+            
+            if should_exclude:
+                continue
+            
+            # Check if this is a contact URL
+            if "/contact/" in url_lower:
+                # Only keep the Amsterdam contact URL
+                if url_lower == keep_contact_normalized.lower():
+                    filtered.append(url)
+                # Skip all other contact URLs
+                continue
+            
+            # Keep all other URLs
+            filtered.append(url)
         
-        return AICapabilities(
-            chatbot_for_candidates=chatbot_for_candidates,
-            chatbot_for_clients=chatbot_for_clients,
-            internal_ai_matching=internal_ai_matching,
-            ai_screening=ai_screening,
-        )
+        return filtered
 
 
 @dg.asset(group_name="agencies")

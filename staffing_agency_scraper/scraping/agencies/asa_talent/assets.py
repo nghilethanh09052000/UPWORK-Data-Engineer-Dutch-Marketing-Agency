@@ -118,10 +118,8 @@ class ASATalentScraper(BaseAgencyScraper):
                             agency.kvk_number = kvk
                 
                 # Extract contact email from kenniscentrum page
-                if "kenniscentrum" in url.lower():
-                    email = self._extract_email_from_kenniscentrum(soup, url)
-                    if email and not agency.contact_email:
-                        agency.contact_email = email
+              
+                agency.contact_email = None
                 
                 # Extract sectors from expertises page (use normalized utils method)
                 if "expertises" in url.lower():
@@ -148,9 +146,8 @@ class ASATalentScraper(BaseAgencyScraper):
                     agency.role_levels = list(set(agency.role_levels))
                 
                 # Extract review sources
-                review_sources = self.utils.fetch_review_sources(soup, url)
-                if review_sources and not agency.review_sources:
-                    agency.review_sources = review_sources
+                # Review extraction removed per client requirement
+                # Reviews must be explicitly shown/linked on the website, not inferred
                 
                 # Extract services from diensten page
                 if url == "https://asatalent.nl/werkgevers/diensten":
@@ -161,10 +158,11 @@ class ASATalentScraper(BaseAgencyScraper):
             except Exception as e:
                 self.logger.warning(f"Error scraping {url}: {e}")
         
-        # Set sectors_core from combined set (removes duplicates)
+        # Set sectors_core from combined set (removes duplicates) and normalize
         if all_sectors:
-            agency.sectors_core = sorted(list(all_sectors))
-            self.logger.info(f"✓ Total unique sectors: {len(agency.sectors_core)}")
+            from staffing_agency_scraper.lib.normalize import normalize_sectors
+            agency.sectors_core = normalize_sectors(sorted(list(all_sectors)))
+            self.logger.info(f"✓ Total unique sectors (normalized): {len(agency.sectors_core)}")
         
         # Try to extract HQ info from RGF Staffing privacy PDF
         try:
@@ -179,9 +177,7 @@ class ASATalentScraper(BaseAgencyScraper):
                 if pdf_data.get("hq_phone"):
                     agency.contact_phone = pdf_data["hq_phone"]
                     self.logger.info(f"✓ Found HQ phone from PDF: {agency.contact_phone}")
-                if pdf_data.get("hq_address"):
-                    # Store full address in notes
-                    agency.notes = f"HQ Address: {pdf_data['hq_address']}"
+
         except Exception as e:
             self.logger.warning(f"Error extracting from RGF PDF: {e}")
         
@@ -190,8 +186,10 @@ class ASATalentScraper(BaseAgencyScraper):
             agency.hq_city = "Utrecht"
             agency.hq_province = "Utrecht"
         
-        # Extract focus segments (students, starters, professionals)
-        agency.focus_segments = self._extract_focus_segments(all_text)
+        # Extract focus segments (students, starters, professionals) and normalize
+        from staffing_agency_scraper.lib.normalize import normalize_focus_segments
+        focus_segments = self._extract_focus_segments(all_text)
+        agency.focus_segments = normalize_focus_segments(focus_segments)
         
         # Derive CAO type and membership from certifications
         if agency.certifications:
@@ -202,8 +200,6 @@ class ASATalentScraper(BaseAgencyScraper):
                 agency.cao_type = CaoType.NBBU
                 agency.membership = ["NBBU"]
 
-        # Extract digital capabilities from website
-        agency.digital_capabilities = self._extract_digital_capabilities(all_text)
         
         # ========================================================================
         # Extract ALL common fields using base class utility method! 🚀
@@ -212,6 +208,7 @@ class ASATalentScraper(BaseAgencyScraper):
         self.extract_all_common_fields(agency, all_text)
 
         # Update evidence URLs
+        # agency.evidence_urls = self.get_filtered_evidence_urls()
         agency.evidence_urls = self.evidence_urls.copy()
         agency.collected_at = self.collected_at
 
@@ -229,6 +226,9 @@ class ASATalentScraper(BaseAgencyScraper):
         self.logger.info(f"  Pages scraped: {len(self.evidence_urls)}")
 
         self.logger.info(f"Completed scrape of {self.AGENCY_NAME}")
+
+        with open('all_text.txt', 'w') as f:
+            f.write(all_text)
         
         return agency
 
@@ -542,20 +542,20 @@ class ASATalentScraper(BaseAgencyScraper):
                     found_services[field] = True
                     self.logger.info(f"✓ Found service '{field}' (from href '{href}') | Source: {url}")
         
-        # Build AgencyServices with found services set to True, others False
+        # Build AgencyServices with found services set to True, others None (unknown)
         return AgencyServices(
-            uitzenden=found_services.get("uitzenden", False),
-            detacheren=found_services.get("detacheren", False),
-            werving_selectie=found_services.get("werving_selectie", False),
-            payrolling=found_services.get("payrolling", False),
-            zzp_bemiddeling=found_services.get("zzp_bemiddeling", False),
-            inhouse_services=found_services.get("inhouse_services", False),
-            opleiden_ontwikkelen=found_services.get("opleiden_ontwikkelen", False),
-            vacaturebemiddeling_only=False,
-            msp=False,
-            rpo=False,
-            executive_search=False,
-            reintegratie_outplacement=False,
+            uitzenden=found_services.get("uitzenden") if "uitzenden" in found_services else None,
+            detacheren=found_services.get("detacheren") if "detacheren" in found_services else None,
+            werving_selectie=found_services.get("werving_selectie") if "werving_selectie" in found_services else None,
+            payrolling=found_services.get("payrolling") if "payrolling" in found_services else None,
+            zzp_bemiddeling=found_services.get("zzp_bemiddeling") if "zzp_bemiddeling" in found_services else None,
+            inhouse_services=found_services.get("inhouse_services") if "inhouse_services" in found_services else None,
+            opleiden_ontwikkelen=found_services.get("opleiden_ontwikkelen") if "opleiden_ontwikkelen" in found_services else None,
+            vacaturebemiddeling_only=None,  # Unknown unless explicitly stated
+            msp=None,  # Unknown unless explicitly stated
+            rpo=None,  # Unknown unless explicitly stated
+            executive_search=None,  # Unknown unless explicitly stated
+            reintegratie_outplacement=None,  # Unknown unless explicitly stated
         )
 
     def _extract_focus_segments(self, text: str) -> list[str]:
@@ -583,44 +583,7 @@ class ASATalentScraper(BaseAgencyScraper):
         self.logger.info(f"Total focus segments found: {len(unique_segments)}")
         return unique_segments
 
-    def _extract_digital_capabilities(self, text: str) -> DigitalCapabilities:
-        """
-        Extract digital capabilities from website text.
-        
-        Looks for keywords indicating portals, apps, APIs, etc.
-        """
-        text_lower = text.lower()
-        
-        # Check for candidate portal (Mijn ASA, mijn omgeving, etc.)
-        candidate_portal = False
-        if "mijn asa" in text_lower or "mijn omgeving" in text_lower or "inloggen" in text_lower:
-            candidate_portal = True
-            self.logger.info("✓ Found digital capability: candidate_portal (Mijn ASA)")
-        
-        # Check for client portal
-        client_portal = False
-        if "werkgeversportaal" in text_lower or "klantenportaal" in text_lower or "client portal" in text_lower:
-            client_portal = True
-            self.logger.info("✓ Found digital capability: client_portal")
-        
-        # Check for mobile app
-        mobile_app = False
-        if "app store" in text_lower or "google play" in text_lower or "mobiele app" in text_lower:
-            mobile_app = True
-            self.logger.info("✓ Found digital capability: mobile_app")
-        
-        # Check for API
-        api_available = False
-        if "api" in text_lower and ("koppeling" in text_lower or "integratie" in text_lower):
-            api_available = True
-            self.logger.info("✓ Found digital capability: api_available")
-        
-        return DigitalCapabilities(
-            candidate_portal=candidate_portal,
-            client_portal=client_portal,
-            mobile_app=mobile_app,
-            api_available=api_available,
-        )
+
 
     def _extract_from_rgf_privacy_pdf(self) -> dict | None:
         """

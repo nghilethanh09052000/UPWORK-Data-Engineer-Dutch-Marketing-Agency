@@ -33,16 +33,6 @@ class MaandagScraper(BaseAgencyScraper):
             "functions": ["logo", "sectors"],
         },
         {
-            "name": "about",
-            "url": "https://www.maandag.com/nl-nl/over-ons",
-            "functions": [],
-        },
-        {
-            "name": "government",
-            "url": "https://www.maandag.com/nl-nl/overheid",
-            "functions": [],
-        },
-        {
             "name": "contact",
             "url": "https://www.maandag.com/nl-nl/contact",
             "functions": ["contact"],
@@ -51,11 +41,6 @@ class MaandagScraper(BaseAgencyScraper):
             "name": "service",
             "url": "https://www.maandag.com/nl-nl/service",
             "functions": ["services"],
-        },
-        {
-            "name": "zzp_start",
-            "url": "https://www.maandag.com/nl-nl/zzpstart",
-            "functions": [],
         },
         {
             "name": "privacy",
@@ -67,16 +52,16 @@ class MaandagScraper(BaseAgencyScraper):
             "url": "https://www.maandag.com/nl-nl/certificeringen",
             "functions": ["certifications"],
         },
-        {
-            "name": "_",
-            "url": "https://www.maandag.com/nl-nl/werken-met-maandag/services/detachering",
-            "functions": [""],
-        },
-        {
-            "name": "_",
-            "url": "https://www.maandag.com/nl-nl/werken-met-maandag",
-            "functions": [""],
-        },
+        # {
+        #     "name": "_",
+        #     "url": "https://www.maandag.com/nl-nl/werken-met-maandag/services/detachering",
+        #     "functions": [""],
+        # },
+        # {
+        #     "name": "_",
+        #     "url": "https://www.maandag.com/nl-nl/werken-met-maandag",
+        #     "functions": [""],
+        # },
     ]
 
     def scrape(self) -> Agency:
@@ -107,13 +92,7 @@ class MaandagScraper(BaseAgencyScraper):
                 # Apply specific functions for this page
                 if functions:
                     self._apply_functions(agency, functions, soup, page_text, url)
-                
-                # Portal detection on every page
-                if self.utils.detect_candidate_portal(soup, page_text, url):
-                    agency.digital_capabilities.candidate_portal = True
-                if self.utils.detect_client_portal(soup, page_text, url):
-                    agency.digital_capabilities.client_portal = True
-                
+            
                 # Extract role levels on every page
                 role_levels = self.utils.fetch_role_levels(page_text, url)
                 if role_levels:
@@ -123,18 +102,11 @@ class MaandagScraper(BaseAgencyScraper):
                     agency.role_levels = list(set(agency.role_levels))
                 
                 # Extract review sources
-                review_sources = self.utils.fetch_review_sources(soup, url)
-                if review_sources and not agency.review_sources:
-                    agency.review_sources = review_sources
+                # Review extraction removed per client requirement
+                # Reviews must be explicitly shown/linked on the website, not inferred
                 
             except Exception as e:
                 self.logger.warning(f"Error scraping {url}: {e}")
-        
-        # Extract sectors from aggregated text (fallback if not found on home page)
-        if not agency.sectors_core:
-            sectors = self.utils.fetch_sectors(all_text, "accumulated_text")
-            if sectors:
-                agency.sectors_core = sectors
         
         # ========================================================================
         # Extract ALL common fields using base class utility method! 🚀
@@ -148,11 +120,14 @@ class MaandagScraper(BaseAgencyScraper):
             agency.hq_province = agency.office_locations[0].province
         
         # Finalize
-        agency.evidence_urls = list(self.evidence_urls)
+        #agency.evidence_urls = self.get_filtered_evidence_urls()
+        agency.avg_time_to_fill_days = None
+        agency.evidence_urls = self.evidence_urls.copy()
         agency.collected_at = self.collected_at
         
         self.logger.info(f"Completed scrape of {self.AGENCY_NAME}")
-        
+        with open("all_text.txt", "w") as f:
+            f.write(all_text)
         return agency
     
     def _apply_functions(
@@ -180,14 +155,11 @@ class MaandagScraper(BaseAgencyScraper):
                 if not agency.office_locations:
                     offices = self._extract_office_locations(soup, url)
                     if offices:
-                        agency.office_locations = offices
-                    else:
-                        # Fallback to generic extraction
-                        agency.office_locations = self.utils.fetch_office_locations(soup, url)
-                
-                # Contact info is already extracted from JSON-LD on home page
-                if not agency.contact_email:
-                    agency.contact_email = self.utils.fetch_contact_email(page_text, url)
+                        # Limit to 10 offices per client requirement (already limited in _extract_office_locations)
+                        agency.office_locations = offices[:10]
+                        if len(offices) > 10:
+                            self.logger.info(f"✓ Limited office_locations to 10 (was {len(offices)}) | Source: {url}")
+                  
                 if not agency.contact_phone:
                     agency.contact_phone = self.utils.fetch_contact_phone(page_text, url)
             
@@ -226,10 +198,12 @@ class MaandagScraper(BaseAgencyScraper):
             agency.services.zzp_bemiddeling = True
             self.logger.info(f"✓ Found service: zzp_bemiddeling | Source: {url}")
         
-        # Also check for MSP (Managed Service Provider) mentioned on the page
-        if "managed service provider" in page_text or "msp" in page_text:
+        # Also check for MSP (Managed Service Provider) - Require explicit confirmation
+        # Only set if clearly stated as a service offering
+        page_text_lower = page_text.lower()
+        if "managed service provider" in page_text_lower or "msp" in page_text_lower:
             agency.services.msp = True
-            self.logger.info(f"✓ Found service: msp | Source: {url}")
+            self.logger.info(f"✓ Found service: msp (explicit confirmation) | Source: {url}")
     
     def _extract_certifications(self, soup: BeautifulSoup, url: str) -> list[str]:
         """
@@ -283,7 +257,7 @@ class MaandagScraper(BaseAgencyScraper):
                 # Look for sector links (e.g., /nl-nl/onderwijs, /nl-nl/it, etc.)
                 if href.startswith("/nl-nl/") and href != "/nl-nl/":
                     # Get the sector text from the span
-                    span = link.find("span", class_="_1k5e5cz0")
+                    span = link.find("span", class_="u88pj50 u88pj5w")
                     if span:
                         sector_text = span.get_text(strip=True)
                         if sector_text and sector_text.lower() not in seen:
@@ -370,9 +344,17 @@ class MaandagScraper(BaseAgencyScraper):
                     )
                     offices.append(office)
                     self.logger.info(f"✓ Found office: {city} ({province}) | Source: {url}")
+                    
+                    # Limit to 10 offices per client requirement
+                    if len(offices) >= 10:
+                        self.logger.info(f"✓ Limited office locations to 10 (per client requirement) | Source: {url}")
+                        break
+            
+            # Ensure we only return max 10 offices
+            offices = offices[:10]
             
             if offices:
-                self.logger.info(f"✓ Extracted {len(offices)} office locations from Next.js JSON")
+                self.logger.info(f"✓ Extracted {len(offices)} office locations from Next.js JSON (limited to 10)")
             
             return offices
         
@@ -463,7 +445,8 @@ class MaandagScraper(BaseAgencyScraper):
             
             # Extract contact email
             if not agency.contact_email and "email" in data:
-                agency.contact_email = data["email"]
+                # agency.contact_email = data["email"]
+                agency.contact_email = None
                 self.logger.info(f"✓ Found contact email (JSON-LD): {agency.contact_email} | Source: {url}")
             
             # Extract contact phone

@@ -32,18 +32,13 @@ class RandstadScraper(BaseAgencyScraper):
         },
         {
             "name": "services_global",
-            "url": "https://www.randstad.com/services/",
-            "functions": ['services_detail', 'legal_footer'],
-        },
-        {
-            "name": "about_glance",
-            "url": "https://www.randstad.com/randstad-at-a-glance/",
-            "functions": ['growth_stats'],
+            "url": "https://www.randstad.nl/werkgevers/onze-hr-diensten",
+            "functions": ['services'],
         },
         {
             "name": "werkgevers",
             "url": "https://www.randstad.nl/werkgevers",
-            "functions": ['services_detail', 'statistics', 'growth_signals'],
+            "functions": ['statistics', 'growth_signals'],
         },
         {
             "name": "vakgebieden",
@@ -51,14 +46,14 @@ class RandstadScraper(BaseAgencyScraper):
             "functions": ['sectors'],
         },
         {
-            "name": "contact",
-            "url": "https://www.randstad.nl/over-randstad/contact",
-            "functions": ['contact', 'hq'],
+            "name": "werkgevers_contact",
+            "url": "https://www.randstad.nl/werkgevers/contact",
+            "functions": ['werkgevers_contact_phone'],
         },
         {
-            "name": "pers_contact",
-            "url": "https://www.randstad.nl/over-randstad/pers/contact",
-            "functions": ['press_contact'],
+            "name": "hq",
+            "url": "https://www.randstad.nl/over-randstad/contact",
+            "functions": ['hq'],
         },
         {
             "name": "certificering",
@@ -74,17 +69,7 @@ class RandstadScraper(BaseAgencyScraper):
             "name": "vestigingen",
             "url": "https://www.randstad.nl/vestigingen",
             "functions": ['office_locations'],
-        },
-        {
-            "name": "vacatures",
-            "url": "https://www.randstad.nl/vacatures",
-            "functions": ['sectors_secondary'],
-        },
-        {
-            "name": "werken_bij",
-            "url": "https://www.werkenbijrandstad.nl/",
-            "functions": ['contact_werken_bij'],
-        },
+        }
     ]
 
     def scrape(self) -> Agency:
@@ -93,7 +78,6 @@ class RandstadScraper(BaseAgencyScraper):
         # Initialize utils
         self.utils = AgencyScraperUtils(logger=self.logger)
         agency = self.create_base_agency()
-        agency.geo_focus_type = GeoFocusType.NATIONAL
         agency.employers_page_url = f"{self.WEBSITE_URL}/werkgevers"
         agency.contact_form_url = f"{self.WEBSITE_URL}/contact-randstad"
         
@@ -127,40 +111,55 @@ class RandstadScraper(BaseAgencyScraper):
         # Extract all common fields using centralized utilities
         self.extract_all_common_fields(agency, all_text)
         
-        # Check AI capabilities via Seamly API
-        self._check_ai_capabilities(agency)
+        # AI capabilities: Only set to True if explicitly stated on website
+        # Removed API-based detection as per client feedback
         
-        # Set candidate portal (mijn-randstad login)
-        candidate_portal_url = "https://www.randstad.nl/mijn-randstad"
-        agency.digital_capabilities.candidate_portal = True
-        self.evidence_urls.append(candidate_portal_url)
-        self.logger.info(f"✓ Candidate portal detected: {candidate_portal_url}")
+        # Finalize sectors: normalize first, then filter
+        from staffing_agency_scraper.lib.normalize import normalize_sectors
         
-        # Finalize sectors
         if all_sectors:
-            agency.sectors_core = sorted(list(all_sectors))
+            original_sectors = sorted(list(all_sectors))
+            agency.sectors_core = normalize_sectors(original_sectors)
+            if agency.sectors_core != original_sectors:
+                self.logger.info(f"✓ Normalized sectors_core: {len(original_sectors)} -> {len(agency.sectors_core)} | Original: {original_sectors[:5]}... | Normalized: {agency.sectors_core[:5]}...")
         
-        # Filter sectors_secondary: exclude any sectors that are in sectors_core
-        # Normalize for comparison (case-insensitive)
+        # Normalize sectors_secondary first, then filter out any that are in sectors_core
         if all_sectors_secondary:
-            sectors_core_lower = {s.lower() for s in all_sectors}
-            sectors_secondary_filtered = [
-                s for s in all_sectors_secondary 
-                if s.lower() not in sectors_core_lower
-            ]
-            if sectors_secondary_filtered:
-                agency.sectors_secondary = sorted(sectors_secondary_filtered)
-                self.logger.info(f"✓ Filtered {len(sectors_secondary_filtered)} secondary sectors (excluded {len(all_sectors_secondary) - len(sectors_secondary_filtered)} that are in sectors_core)")
+            original_secondary = sorted(list(all_sectors_secondary))
+            normalized_secondary = normalize_sectors(original_secondary)
+            if normalized_secondary != original_secondary:
+                self.logger.info(f"✓ Normalized sectors_secondary: {len(original_secondary)} -> {len(normalized_secondary)} | Original: {original_secondary[:5]}... | Normalized: {normalized_secondary[:5]}...")
+            
+            # Filter: exclude any sectors that are already in sectors_core (case-insensitive comparison)
+            if agency.sectors_core:
+                sectors_core_lower = {s.lower() for s in agency.sectors_core}
+                sectors_secondary_filtered = [
+                    s for s in normalized_secondary 
+                    if s.lower() not in sectors_core_lower
+                ]
+                excluded_count = len(normalized_secondary) - len(sectors_secondary_filtered)
+                if excluded_count > 0:
+                    self.logger.info(f"✓ Filtered sectors_secondary: removed {excluded_count} duplicate(s) that are in sectors_core")
+                agency.sectors_secondary = sectors_secondary_filtered
+            else:
+                agency.sectors_secondary = normalized_secondary
         
-        agency.evidence_urls = list(self.evidence_urls)
+        # agency.evidence_urls = self.get_filtered_evidence_urls()
+        agency.evidence_urls = self.evidence_urls.copy()
         agency.collected_at = self.collected_at
+        agency.avg_hourly_rate_low = None
+        agency.avg_hourly_rate_high = None
+        agency.min_hours_per_week = None
         
         self.logger.info("=" * 80)
         self.logger.info(f"✅ Completed scrape of {self.AGENCY_NAME}")
         self.logger.info(f"📄 Evidence URLs: {len(agency.evidence_urls)}")
         self.logger.info("=" * 80)
 
-      
+        with open("all_text.txt", "w") as f:
+            f.write(all_text)
+   
+        
         return agency
     
     def _apply_functions(
@@ -187,20 +186,11 @@ class RandstadScraper(BaseAgencyScraper):
             elif func_name == "services":
                 self._extract_services(soup, page_text, agency, url)
             
-            elif func_name == "services_detail":
-                self._extract_services_detail(soup, agency, url)
-            
             elif func_name == "legal_footer":
                 self._extract_legal_footer(soup, agency, url)
             
-            elif func_name == "growth_stats":
-                self._extract_growth_stats(soup, agency, url)
-            
-            elif func_name == "contact":
-                self._extract_contact(soup, page_text, agency, url)
-            
-            elif func_name == "contact_werken_bij":
-                self._extract_contact_werken_bij(soup, agency, url)
+            elif func_name == "werkgevers_contact_phone":
+                self._extract_werkgevers_contact_phone(soup, agency, url)
             
             elif func_name == "hq":
                 self._extract_hq(soup, agency, url)
@@ -230,19 +220,33 @@ class RandstadScraper(BaseAgencyScraper):
             
             elif func_name == "growth_signals":
                 self._extract_growth_signals_from_werkgevers(soup, page_text, agency, url)
-            
-            elif func_name == "press_contact":
-                self._extract_press_contact(soup, agency, url)
     
     def _extract_header(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
-        """Extract data from header navigation."""
+        """Extract data from header navigation and footer (mobile app detection)."""
         # Look for navigation menu
         nav = soup.find("nav")
         if nav:
-            # Extract mobile app presence
-            if nav.find("a", href=lambda x: x and ("app.apple.com" in x or "play.google.com" in x)):
+            # Extract mobile app presence from nav
+            if nav.find("a", href=lambda x: x and ("apps.apple.com" in x or "itunes.apple.com" in x or "play.google.com" in x)):
                 agency.digital_capabilities.mobile_app = True
-                self.logger.info(f"✓ Found mobile app links | Source: {url}")
+                self.logger.info(f"✓ Found mobile app links in navigation | Source: {url}")
+        
+        # Also check footer for mobile app links (more common location)
+        footer = soup.find("footer")
+        if footer:
+            # Look for Apple App Store links (itunes.apple.com or apps.apple.com)
+            app_store_link = footer.find("a", href=lambda x: x and ("itunes.apple.com" in x or "apps.apple.com" in x))
+            # Look for Google Play Store links
+            google_play_link = footer.find("a", href=lambda x: x and "play.google.com" in x)
+            
+            if app_store_link or google_play_link:
+                agency.digital_capabilities.mobile_app = True
+                stores = []
+                if app_store_link:
+                    stores.append("Apple App Store")
+                if google_play_link:
+                    stores.append("Google Play Store")
+                self.logger.info(f"✓ Found mobile app links in footer: {', '.join(stores)} | Source: {url}")
     
     def _extract_logo(self, soup: BeautifulSoup, url: str) -> str | None:
         """
@@ -280,110 +284,200 @@ class RandstadScraper(BaseAgencyScraper):
         # Fall back to utils method
         return self.utils.fetch_logo(soup, url)
     
+
     def _extract_services(self, soup: BeautifulSoup, page_text: str, agency: Agency, url: str) -> None:
-        """Extract services from werkgevers page."""
-        # Use utils for initial detection
-        services = self.utils.fetch_services(page_text, url)
-        agency.services = services
-        
-        # Check for enterprise services (MSP, RPO)
-        if "msp" in page_text.lower() or "managed service" in page_text.lower():
-            agency.services.msp = True
-            self.logger.info(f"✓ Found MSP service | Source: {url}")
-        
-        if "rpo" in page_text.lower() or "recruitment process outsourcing" in page_text.lower():
-            agency.services.rpo = True
-            self.logger.info(f"✓ Found RPO service | Source: {url}")
-        
-        if "outplacement" in page_text.lower():
-            agency.services.reintegratie_outplacement = True
-            self.logger.info(f"✓ Found outplacement service | Source: {url}")
-    
-    def _extract_services_detail(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
         """
-        Extract services from services page or werkgevers page.
+        Extract services from the HR services page with card-based layout.
         
-        Services listed:
-        - temporary staffing / uitzenden
-        - flexible to permanent staffing / detacheren
-        - permanent recruitment / werving en selectie
-        - HR support
-        - workforce management
-        - payrolling
-        - RPO, MSP
+        Expected HTML structure:
+        <div class="employers__block__content">
+          <div class="employers__block__cards">
+            <a class="employers__card" data-analytics-label="uitzenden" href="/uitzenden">
+              <div class="company__name">uitzenden</div>
+            </a>
+            ...
+          </div>
+        </div>
         """
-        page_text = soup.get_text(separator=" ", strip=True).lower()
+        self.logger.info(f"🔍 Extracting services from {url}")
+        
         services_found = []
         
-        # Try to find services from link list (services page)
-        link_list = soup.find("ul", class_="link-list")
-        if link_list:
-            for link in link_list.find_all("a", class_="link-list__link"):
-                service_text = link.get_text(strip=True).lower()
-                
-                if "temporary staffing" in service_text or "temp" in service_text:
-                    agency.services.uitzenden = True
-                    services_found.append("temporary staffing")
-                
-                if "flexible to permanent" in service_text or "flex" in service_text:
-                    agency.services.detacheren = True
-                    services_found.append("flexible to permanent")
-                
-                if "permanent recruitment" in service_text or "perm" in service_text:
-                    agency.services.werving_selectie = True
-                    services_found.append("permanent recruitment")
-                
-                if "payrolling" in service_text:
-                    agency.services.payrolling = True
-                    services_found.append("payrolling")
-                
-                if "workforce management" in service_text:
-                    agency.services.inhouse_services = True
-                    services_found.append("workforce management")
+        # First, try to find within employers__block__content (more specific)
+        content_blocks = soup.find_all("div", class_="employers__block__content")
+        for content_block in content_blocks:
+            cards_container = content_block.find("div", class_="employers__block__cards")
+            if cards_container:
+                service_cards = cards_container.find_all("a", class_="employers__card")
+                if service_cards:
+                    # Found service cards, process them
+                    for card in service_cards:
+                        # Get service name from company__name div or data-analytics-label
+                        company_name_div = card.find("div", class_="company__name")
+                        service_name = None
+                        
+                        if company_name_div:
+                            service_name = company_name_div.get_text(strip=True).lower()
+                        else:
+                            # Fallback to data-analytics-label
+                            service_name = card.get("data-analytics-label", "").lower()
+                        
+                        if not service_name:
+                            continue
+                        
+                        # Skip non-service cards (like "onze diensten", "contact")
+                        if service_name in ["onze diensten", "contact", "onze hr-diensten"]:
+                            continue
+                        
+                        # Map service names to service fields
+                        service_name_clean = service_name.strip()
+                        
+                        # uitzenden
+                        if service_name_clean == "uitzenden":
+                            agency.services.uitzenden = True
+                            services_found.append("uitzenden")
+                        
+                        # detacheren
+                        elif service_name_clean == "detacheren":
+                            agency.services.detacheren = True
+                            services_found.append("detacheren")
+                        
+                        # werving & selectie
+                        elif "werving" in service_name_clean and "selectie" in service_name_clean:
+                            agency.services.werving_selectie = True
+                            services_found.append("werving & selectie")
+                        
+                        # payroll
+                        elif service_name_clean == "payroll":
+                            agency.services.payrolling = True
+                            services_found.append("payroll")
+                        
+                        # zzp bemiddeling
+                        elif "zzp" in service_name_clean:
+                            agency.services.zzp_bemiddeling = True
+                            services_found.append("zzp bemiddeling")
+                        
+                        # opleiden & ontwikkelen
+                        elif "opleiden" in service_name_clean or "ontwikkelen" in service_name_clean:
+                            agency.services.opleiden_ontwikkelen = True
+                            services_found.append("opleiden & ontwikkelen")
+                        
+                        # reintegratie / outplacement
+                        elif "re-integratie" in service_name_clean or service_name_clean == "outplacement":
+                            agency.services.reintegratie_outplacement = True
+                            services_found.append("reintegratie/outplacement")
+                        
+                        # MSP
+                        elif service_name_clean == "msp":
+                            agency.services.msp = True
+                            services_found.append("MSP")
+                        
+                        # Executive Search
+                        elif "executive search" in service_name_clean:
+                            agency.services.executive_search = True
+                            services_found.append("executive search")
+                        
+                        # Inhouse services (personeelsplanning, contractmanagement, leveranciersmanagement)
+                        elif any(keyword in service_name_clean for keyword in [
+                            "personeelsplanning", "contractmanagement", "leveranciersmanagement",
+                            "inhouse", "in-house"
+                        ]):
+                            agency.services.inhouse_services = True
+                            services_found.append(service_name_clean)
+                    
+                    # If we found services, break out of the loop
+                    if services_found:
+                        break
         
-        # Also extract from page text (werkgevers page)
-        # Check for Dutch service terms
-        if "uitzenden" in page_text or "temporary" in page_text or "tijdelijk" in page_text:
-            agency.services.uitzenden = True
-            if "uitzenden" not in [s.lower() for s in services_found]:
-                services_found.append("uitzenden")
-        
-        if "detacheren" in page_text or "detachering" in page_text:
-            agency.services.detacheren = True
-            if "detacheren" not in [s.lower() for s in services_found]:
-                services_found.append("detacheren")
-        
-        if "werving" in page_text and "selectie" in page_text:
-            agency.services.werving_selectie = True
-            if "werving en selectie" not in [s.lower() for s in services_found]:
-                services_found.append("werving en selectie")
-        
-        if "payroll" in page_text:
-            agency.services.payrolling = True
-            if "payrolling" not in [s.lower() for s in services_found]:
-                services_found.append("payrolling")
-        
-        # Check for RPO and MSP
-        if "rpo" in page_text or "recruitment process outsourcing" in page_text:
-            agency.services.rpo = True
-            services_found.append("RPO")
-        
-        if "msp" in page_text or "managed service provider" in page_text:
-            agency.services.msp = True
-            services_found.append("MSP")
-        
-        # Check for outplacement
-        if "outplacement" in page_text:
-            agency.services.reintegratie_outplacement = True
-            services_found.append("outplacement")
-        
-        # Check for training/development
-        if "opleiden" in page_text or "ontwikkelen" in page_text or "training" in page_text:
-            agency.services.opleiden_ontwikkelen = True
-            services_found.append("opleiden/ontwikkelen")
+        # Fallback: if no services found in content blocks, try direct search
+        if not services_found:
+            cards_container = soup.find("div", class_="employers__block__cards")
+            if cards_container:
+                service_cards = cards_container.find_all("a", class_="employers__card")
+                if service_cards:
+                    # Process cards using the same logic
+                    for card in service_cards:
+                        # Get service name from company__name div or data-analytics-label
+                        company_name_div = card.find("div", class_="company__name")
+                        service_name = None
+                        
+                        if company_name_div:
+                            service_name = company_name_div.get_text(strip=True).lower()
+                        else:
+                            # Fallback to data-analytics-label
+                            service_name = card.get("data-analytics-label", "").lower()
+                        
+                        if not service_name:
+                            continue
+                        
+                        # Skip non-service cards (like "onze diensten", "contact")
+                        if service_name in ["onze diensten", "contact", "onze hr-diensten"]:
+                            continue
+                        
+                        # Map service names to service fields
+                        service_name_clean = service_name.strip()
+                        
+                        # uitzenden
+                        if service_name_clean == "uitzenden":
+                            agency.services.uitzenden = True
+                            services_found.append("uitzenden")
+                        
+                        # detacheren
+                        elif service_name_clean == "detacheren":
+                            agency.services.detacheren = True
+                            services_found.append("detacheren")
+                        
+                        # werving & selectie
+                        elif "werving" in service_name_clean and "selectie" in service_name_clean:
+                            agency.services.werving_selectie = True
+                            services_found.append("werving & selectie")
+                        
+                        # payroll
+                        elif service_name_clean == "payroll":
+                            agency.services.payrolling = True
+                            services_found.append("payroll")
+                        
+                        # zzp bemiddeling
+                        elif "zzp" in service_name_clean:
+                            agency.services.zzp_bemiddeling = True
+                            services_found.append("zzp bemiddeling")
+                        
+                        # opleiden & ontwikkelen
+                        elif "opleiden" in service_name_clean or "ontwikkelen" in service_name_clean:
+                            agency.services.opleiden_ontwikkelen = True
+                            services_found.append("opleiden & ontwikkelen")
+                        
+                        # reintegratie / outplacement
+                        elif "re-integratie" in service_name_clean or service_name_clean == "outplacement":
+                            agency.services.reintegratie_outplacement = True
+                            services_found.append("reintegratie/outplacement")
+                        
+                        # MSP
+                        elif service_name_clean == "msp":
+                            agency.services.msp = True
+                            services_found.append("MSP")
+                        
+                        # Executive Search
+                        elif "executive search" in service_name_clean:
+                            agency.services.executive_search = True
+                            services_found.append("executive search")
+                        
+                        # Inhouse services (personeelsplanning, contractmanagement, leveranciersmanagement)
+                        elif any(keyword in service_name_clean for keyword in [
+                            "personeelsplanning", "contractmanagement", "leveranciersmanagement",
+                            "inhouse", "in-house"
+                        ]):
+                            agency.services.inhouse_services = True
+                            services_found.append(service_name_clean)
+                else:
+                    self.logger.warning(f"Could not find any employers__card elements on {url}")
+            else:
+                self.logger.warning(f"Could not find employers__block__cards on {url}")
         
         if services_found:
             self.logger.info(f"✓ Found {len(services_found)} services: {', '.join(services_found)} | Source: {url}")
+        else:
+            self.logger.warning(f"No services extracted from {url}")
     
     def _extract_legal_footer(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
         """
@@ -454,15 +548,11 @@ class RandstadScraper(BaseAgencyScraper):
                 agency.growth_signals.append(signal)
             self.logger.info(f"✓ Found employee count: {employees:,} employees worldwide | Source: {url}")
         
-        # Extract annual placements (global - NOT Dutch specific!)
-        placements_match = re.search(r'supported over ([\d.]+) million talent', page_text, re.IGNORECASE)
-        if placements_match:
-            placements_millions = float(placements_match.group(1))
-            placements = int(placements_millions * 1_000_000)
-            signal = f"{placements}_plaatsingen_per_jaar_wereldwijd"
-            if signal not in agency.growth_signals:
-                agency.growth_signals.append(signal)
-            self.logger.info(f"✓ Found annual placements (global): {placements:,} | Source: {url}")
+        # Do NOT extract annual placements if it requires calculation (million conversion)
+        # Client feedback: avoid all calculations, set to null if not explicitly stated as exact number
+        # placements_match = re.search(r'supported over ([\d.]+)\s+million\s+talent', page_text, re.IGNORECASE)
+        # Skipped: requires calculation (* 1_000_000)
+        self.logger.info(f"  Skipped annual placements (requires calculation: million conversion) | Source: {url}")
         
         # Extract revenue
         revenue_match = re.search(r'revenue of €([\d.]+) billion', page_text, re.IGNORECASE)
@@ -481,61 +571,15 @@ class RandstadScraper(BaseAgencyScraper):
                 agency.growth_signals.append(signal)
             self.logger.info(f"✓ Found founding year: 1960 (64+ years active) | Source: {url}")
     
-    def _extract_contact(self, soup: BeautifulSoup, page_text: str, agency: Agency, url: str) -> None:
-        """Extract contact information."""
-        email = self.utils.fetch_contact_email(page_text, url)
-        phone = self.utils.fetch_contact_phone(page_text, url)
-        offices = self.utils.fetch_office_locations(soup, url)
+    def _extract_werkgevers_contact_phone(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
+        """
+        Extract general telephone number from werkgevers contact page.
         
-        if email:
-            agency.contact_email = email
-        if phone:
-            agency.contact_phone = phone
-        if offices:
-            agency.office_locations = offices
-    
-    def _extract_contact_werken_bij(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
+        Expected format:
+        <h4>General telephone number</h4>
+        <p><a href="tel:080072637823">0800 72 63 78 23</a></p>
         """
-        Extract contact email from the werken bij Randstad page.
-        This email replaces any existing contact email.
-        """
-        self.logger.info(f"🔍 Extracting contact email from werken bij page: {url}")
-        
-        # Find the footer column with contact information
-        footer_column = soup.find("div", id="footercolumn")
-        if not footer_column:
-            self.logger.warning(f"Could not find footercolumn on {url}")
-            return
-        
-        # Find mailto link in the footer column
-        mailto_link = footer_column.find("a", href=re.compile(r'^mailto:'))
-        if mailto_link:
-            email = mailto_link.get("href", "").replace("mailto:", "").strip()
-            if email:
-                # Replace existing email (not just set if empty)
-                agency.contact_email = email
-                self.evidence_urls.append(url)
-                self.logger.info(f"✓ Found contact email from werken bij page: {email} | Source: {url}")
-            else:
-                self.logger.warning(f"Found mailto link but email is empty on {url}")
-        else:
-            # Fallback: try to extract from text
-            footer_text = footer_column.get_text()
-            email_match = re.search(r'info@werkenbijrandstad\.nl', footer_text, re.IGNORECASE)
-            if email_match:
-                email = "info@werkenbijrandstad.nl"
-                agency.contact_email = email
-                self.evidence_urls.append(url)
-                self.logger.info(f"✓ Found contact email from werken bij page (text): {email} | Source: {url}")
-            else:
-                self.logger.warning(f"Could not find contact email on {url}")
-    
-    def _extract_press_contact(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
-        """
-        Extract press contact information from the press contact page.
-        Extracts press email, press phone, and general contact information.
-        """
-        self.logger.info(f"🔍 Extracting press contact information from {url}")
+        self.logger.info(f"🔍 Extracting general telephone number from {url}")
         
         # Find the article content
         article = soup.find("article")
@@ -543,64 +587,38 @@ class RandstadScraper(BaseAgencyScraper):
             self.logger.warning(f"Could not find article on {url}")
             return
         
-        article_text = article.get_text(separator=" ", strip=True)
+        # Look for "General telephone number" heading
+        h4_headings = article.find_all("h4")
+        for h4 in h4_headings:
+            h4_text = h4.get_text(strip=True).lower()
+            if "general telephone number" in h4_text or "algemeen telefoonnummer" in h4_text:
+                # Find the next <p> tag with a tel link
+                next_p = h4.find_next_sibling("p")
+                if next_p:
+                    tel_link = next_p.find("a", href=re.compile(r'^tel:'))
+                    if tel_link:
+                        phone = tel_link.get("href", "").replace("tel:", "").strip()
+                        # Format: remove any colons or extra spaces, keep the format from the link text
+                        phone_text = tel_link.get_text(strip=True)
+                        if phone_text:
+                            # Use the formatted text from the link (e.g., "0800 72 63 78 23")
+                            from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                            normalized_phone = normalize_contact_phone(phone_text)
+                            agency.contact_phone = normalized_phone
+                            if normalized_phone != phone_text:
+                                self.logger.info(f"✓ Found general telephone number: {phone_text} -> normalized to: {normalized_phone} | Source: {url}")
+                            else:
+                                self.logger.info(f"✓ Found general telephone number: {normalized_phone} | Source: {url}")
+                            return
+                        elif phone:
+                            # Fallback to the href value, normalize it
+                            from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                            normalized_phone = normalize_contact_phone(phone)
+                            agency.contact_phone = normalized_phone
+                            self.logger.info(f"✓ Found general telephone number: {phone} -> normalized to: {normalized_phone} | Source: {url}")
+                            return
         
-        # Extract press contact email
-        press_email_match = re.search(r'pers@randstadgroep\.nl', article_text, re.IGNORECASE)
-        if press_email_match:
-            press_email = "pers@randstadgroep.nl"
-            # Store in a field if available, or add to growth_signals/notes
-            if not agency.contact_email:
-                agency.contact_email = press_email
-            self.logger.info(f"✓ Found press email: {press_email} | Source: {url}")
-        
-        # Extract press contact phone
-        press_phone_match = re.search(r'06[-.\s]?57090598|0657090598', article_text)
-        if press_phone_match:
-            press_phone = "06-57090598"
-            # Store in a field if available, or add to notes
-            if not agency.contact_phone:
-                agency.contact_phone = press_phone
-            self.logger.info(f"✓ Found press phone: {press_phone} | Source: {url}")
-        
-        # Extract general contact email
-        general_email_match = re.search(r'info@nl\.randstad\.com', article_text, re.IGNORECASE)
-        if general_email_match:
-            general_email = "info@nl.randstad.com"
-            # Use as primary contact email if not already set
-            if not agency.contact_email:
-                agency.contact_email = general_email
-            self.logger.info(f"✓ Found general email: {general_email} | Source: {url}")
-        
-        # Extract general contact phone
-        general_phone_match = re.search(r'020[-.\s]?5208800|0205208800', article_text)
-        if general_phone_match:
-            general_phone = "020-5208800"
-            # Use as primary contact phone if not already set
-            if not agency.contact_phone:
-                agency.contact_phone = general_phone
-            self.logger.info(f"✓ Found general phone: {general_phone} | Source: {url}")
-        
-        # Also try to extract from mailto and tel links
-        mailto_links = soup.find_all("a", href=re.compile(r'^mailto:'))
-        for link in mailto_links:
-            email = link.get("href", "").replace("mailto:", "").strip()
-            if email:
-                if not agency.contact_email:
-                    agency.contact_email = email
-                    self.logger.info(f"✓ Found email from link: {email} | Source: {url}")
-        
-        tel_links = soup.find_all("a", href=re.compile(r'^tel:'))
-        for link in tel_links:
-            phone = link.get("href", "").replace("tel:", "").strip()
-            if phone:
-                # Format phone number
-                phone = phone.replace("-", "-").replace(".", "-")
-                if not agency.contact_phone:
-                    agency.contact_phone = phone
-                    self.logger.info(f"✓ Found phone from link: {phone} | Source: {url}")
-        
-        self.logger.info(f"✓ Press contact extraction completed | Source: {url}")
+        self.logger.warning(f"Could not find general telephone number on {url}")
     
     def _extract_hq(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
         """
@@ -617,8 +635,11 @@ class RandstadScraper(BaseAgencyScraper):
         # Extract phone
         phone_match = re.search(r'T\s*\+31\s*\(0\)20\s*569\s*5911', page_text)
         if phone_match and not agency.contact_phone:
-            agency.contact_phone = "+31 (0)20 569 5911"
-            self.logger.info(f"✓ Found HQ phone: +31 (0)20 569 5911 | Source: {url}")
+            from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+            phone = "+31 (0)20 569 5911"
+            normalized_phone = normalize_contact_phone(phone)
+            agency.contact_phone = normalized_phone
+            self.logger.info(f"✓ Found HQ phone: {phone} -> normalized to: {normalized_phone} | Source: {url}")
         
         # Extract city (Diemen or Amsterdam)
         if "diemen" in page_text.lower():
@@ -817,10 +838,11 @@ class RandstadScraper(BaseAgencyScraper):
     
     def _extract_office_locations(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
         """
-        Extract office locations from the vestigingen page.
-        Finds all office cards and extracts city names, then adds office URLs to evidence_urls.
+        Extract representative office locations from the vestigingen page (max 10).
+        Finds office cards and extracts city names.
+        Does NOT add individual office card URLs to evidence_urls.
         """
-        self.logger.info(f"🔍 Extracting office locations from {url}")
+        self.logger.info(f"🔍 Extracting representative office locations from {url} (limited to 10)")
         
         if not agency.office_locations:
             agency.office_locations = []
@@ -839,9 +861,13 @@ class RandstadScraper(BaseAgencyScraper):
         
         self.logger.info(f"✓ Found {len(cards)} office cards | Source: {url}")
         
-        office_urls = set()
-        
-        for card in cards:
+        # Limit to 10 representative offices
+        for card in cards[:10]:
+            # Stop if we've reached the limit
+            if len(agency.office_locations) >= 10:
+                self.logger.info(f"✓ Limited office locations to 10 (per client requirement)")
+                break
+            
             try:
                 # Extract city name from h2
                 h2 = card.find("h2")
@@ -864,17 +890,10 @@ class RandstadScraper(BaseAgencyScraper):
                 if not city_name:
                     continue
                 
-                # Get office URL from the link
-                link = card.find("a", href=True)
-                if link:
-                    office_path = link.get("href", "")
-                    if office_path:
-                        # Convert relative URL to absolute
-                        if office_path.startswith("/"):
-                            office_url = f"{self.WEBSITE_URL}{office_path}"
-                        else:
-                            office_url = f"{self.WEBSITE_URL}/{office_path}"
-                        office_urls.add(office_url)
+                # Check if already exists (avoid duplicates)
+                if any(off.city == city_name for off in agency.office_locations):
+                    self.logger.info(f"  Skipped duplicate: {city_name}")
+                    continue
                 
                 # Determine province using utils
                 province = self.utils.map_city_to_province(city_name)
@@ -885,24 +904,17 @@ class RandstadScraper(BaseAgencyScraper):
                     province=province,
                 )
                 
-                # Check if already exists (avoid duplicates)
-                if not any(off.city == city_name for off in agency.office_locations):
-                    agency.office_locations.append(office)
-                    self.logger.info(f"✓ Office: {city_name}, {province} | Source: {url}")
-                else:
-                    self.logger.info(f"  Skipped duplicate: {city_name}")
+                agency.office_locations.append(office)
+                self.logger.info(f"✓ Office: {city_name}, {province} | Source: {url}")
                 
             except Exception as e:
                 self.logger.error(f"Error processing office card: {e}")
                 continue
         
-        # Add all office URLs to evidence_urls (without fetching them)
-        if office_urls:
-            for office_url in office_urls:
-                self.evidence_urls.append(office_url)
-            self.logger.info(f"✓ Added {len(office_urls)} office URLs to evidence_urls | Source: {url}")
+        # Ensure we only have max 10 offices
+        agency.office_locations = agency.office_locations[:10]
         
-        self.logger.info(f"✓ Total offices extracted: {len(agency.office_locations)} | Source: {url}")
+        self.logger.info(f"✓ Total representative offices extracted (limited to 10): {len(agency.office_locations)} | Source: {url}")
     
     def _extract_statistics(self, soup: BeautifulSoup, page_text: str, agency: Agency, url: str) -> None:
         """
@@ -913,25 +925,72 @@ class RandstadScraper(BaseAgencyScraper):
         
         self.logger.info(f"🔍 Extracting statistics from {url}")
         
-        # Extract candidate pool size (1.5 million talents)
-        candidate_pool_match = re.search(r"(\d+\.?\d*)\s*(?:million|miljoen)\s*(?:talent|talenten|kandidaten)", page_text, re.IGNORECASE)
-        if candidate_pool_match:
-            value = float(candidate_pool_match.group(1))
-            if value < 10:  # Likely in millions
-                agency.candidate_pool_size_estimate = int(value * 1_000_000)
-                self.logger.info(f"✓ Found candidate pool: {agency.candidate_pool_size_estimate:,} | Source: {url}")
+        # Helper to parse numbers written with comma or dot decimals (e.g., 1,5 million)
+        def _parse_million_number(raw: str) -> float:
+            try:
+                return float(raw.replace(",", "."))
+            except Exception:
+                return 0.0
         
-        # Extract monthly visitors (1.4 million online visitors per month)
-        visitors_match = re.search(r"(\d+\.?\d*)\s*(?:million|miljoen)\s*(?:online\s*)?visitors?\s*(?:per\s*month|per\s*maand)", page_text, re.IGNORECASE)
+        # Extract candidate pool size from "talentendatabase" (talent database)
+        # The website says: "talentendatabase met meer dan 1,5 miljoen talenten"
+        # Note: This is the database size (people they can source from), which we use as candidate_pool_size_estimate
+        # We specifically look for mentions of "database" or "talentendatabase" to ensure we get the right number
+        
+        # Pattern 1: Look for "talentendatabase" or "database" with number (e.g., "talentendatabase met meer dan 1,5 miljoen talenten")
+        database_pattern = r"(?:talentendatabase|database).{0,100}?(?:meer\s+dan\s+)?(\d+[.,]\d+|\d+)\s*(?:million|miljoen)\s*(?:talent|talenten|kandidaten)"
+        candidate_pool_match = re.search(database_pattern, page_text, re.IGNORECASE)
+        
+        # Pattern 2: Fallback - look for number near "talenten" but only if it's clearly about database/pool
+        # This is less specific, so we only use it if database pattern didn't match
+        if not candidate_pool_match:
+            # Look for decimal/comma numbers first (more specific, like "1,5")
+            decimal_pattern = r"(?:meer\s+dan\s+)?(\d+[.,]\d+)\s*(?:million|miljoen)\s*(?:talent|talenten|kandidaten)"
+            candidate_pool_match = re.search(decimal_pattern, page_text, re.IGNORECASE)
+        
+        if candidate_pool_match:
+            matched_text = candidate_pool_match.group(0)
+            raw_value = candidate_pool_match.group(1)
+            self.logger.info(f"   Matched text: '{matched_text}' | Raw value: '{raw_value}'")
+            
+            # Do NOT extract candidate pool size if it requires calculation (million conversion)
+            # Client feedback: avoid all calculations, set to null if not explicitly stated as exact number
+            value = _parse_million_number(raw_value)
+            if value > 0:
+                # If it mentions "million" or "miljoen", skip (requires calculation)
+                if "million" in matched_text.lower() or "miljoen" in matched_text.lower():
+                    self.logger.info(f"  Skipped candidate pool (requires calculation: million conversion from '{matched_text}') | Source: {url}")
+                else:
+                    # Only extract if it's an exact number without unit conversion
+                    agency.candidate_pool_size_estimate = int(value)
+                    self.logger.info(f"✓ Found candidate pool (exact number, no calculation): {agency.candidate_pool_size_estimate:,} (from '{matched_text}') | Source: {url}")
+            else:
+                self.logger.warning(f"⚠ Invalid candidate pool value: '{raw_value}' | Source: {url}")
+        
+        # Extract monthly visitors (e.g., "1,4 miljoen online bezoekers per maand")
+        visitors_match = re.search(
+            r"(\d+[.,]?\d*)\s*(?:million|miljoen)\s*(?:online\s*)?(?:visitors?|bezoekers?)\s*(?:per\s*month|per\s*maand)",
+            page_text,
+            re.IGNORECASE,
+        )
+        # Do NOT extract monthly visitors if it requires calculation (million conversion)
+        # Client feedback: avoid all calculations, set to null if not explicitly stated as exact number
         if visitors_match:
-            value = float(visitors_match.group(1))
-            if value < 10:  # Likely in millions
-                monthly_visitors = int(value * 1_000_000)
-                # Store as growth signal or note
-                if not agency.growth_signals:
-                    agency.growth_signals = []
-                agency.growth_signals.append(f"{monthly_visitors:,} online visitors per month")
-                self.logger.info(f"✓ Found monthly visitors: {monthly_visitors:,} | Source: {url}")
+            matched_text = visitors_match.group(0).lower()
+            # If it mentions "million" or "miljoen", skip (requires calculation)
+            if "million" in matched_text or "miljoen" in matched_text:
+                self.logger.info(f"  Skipped monthly visitors (requires calculation: million conversion from '{matched_text}') | Source: {url}")
+            else:
+                # Only extract if it's an exact number without unit conversion
+                value = _parse_million_number(visitors_match.group(1))
+                if value > 0:
+                    monthly_visitors = int(value)
+                    if not agency.growth_signals:
+                        agency.growth_signals = []
+                    note = f"{monthly_visitors:,} online visitors per month"
+                    if note not in agency.growth_signals:
+                        agency.growth_signals.append(note)
+                    self.logger.info(f"✓ Found monthly visitors (exact number, no calculation): {monthly_visitors:,} | Source: {url}")
         
         # Extract years of experience (65 years)
         years_match = re.search(r"(\d+)\s*(?:years?|jaar)\s*(?:of\s*experience|ervaring)", page_text, re.IGNORECASE)
@@ -996,31 +1055,8 @@ class RandstadScraper(BaseAgencyScraper):
         
         self.logger.info(f"✓ Total growth signals extracted: {len(signals_found)} | Source: {url}")
     
-    def _check_ai_capabilities(self, agency: Agency) -> None:
-        """
-        Check if Randstad has AI capabilities by calling the Seamly API.
-        If the API returns status 200, set chatbot_for_candidates and chatbot_for_clients to True.
-        """
-        api_url = "https://api.seamly-app.com/channels/api/v2/client/7f2ceefd-2e81-4067-a930-c039dc811d25/translations/4/nl-informal.json"
-        
-        self.logger.info(f"🔍 Checking AI capabilities via Seamly API: {api_url}")
-        
-        try:
-            response = requests.get(api_url, timeout=10)
-            
-            if response.status_code == 200:
-                agency.ai_capabilities.internal_ai_matching = True
-                agency.ai_capabilities.chatbot_for_candidates = True
-                agency.ai_capabilities.chatbot_for_clients = True
-                self.evidence_urls.append(api_url)
-                self.logger.info(f"✓ AI capabilities detected: chatbot for candidates and clients enabled | API: {api_url}")
-            else:
-                self.logger.info(f"  AI capabilities not detected (status {response.status_code}) | API: {api_url}")
-        
-        except requests.exceptions.RequestException as e:
-            self.logger.warning(f"⚠ Failed to check AI capabilities API: {e} | API: {api_url}")
-        except Exception as e:
-            self.logger.error(f"❌ Error checking AI capabilities: {e} | API: {api_url}")
+    # Removed _check_ai_capabilities method - AI capabilities should only be set
+    # to True if explicitly stated on the website, not inferred from API calls
 
 
 @dg.asset(group_name="agencies")

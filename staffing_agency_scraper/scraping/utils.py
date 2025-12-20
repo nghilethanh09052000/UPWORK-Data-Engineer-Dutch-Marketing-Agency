@@ -12,6 +12,12 @@ from typing import Dict, List, Optional, Union
 
 from bs4 import BeautifulSoup
 
+from staffing_agency_scraper.lib.normalize import (
+    normalize_regions_served,
+    normalize_sectors,
+    normalize_focus_segments,
+    normalize_contact_phone,
+)
 from staffing_agency_scraper.models import (
     AgencyServices,
     CaoType,
@@ -91,6 +97,8 @@ PORTAL_INDICATORS = [
 ]
 
 # Role Levels - Detection Keywords
+# Rule: Only match explicit role level mentions in context of job levels/candidates
+# Require context that indicates these are actual job levels offered, not just generic mentions
 ROLE_LEVEL_KEYWORDS = {
     "student": [
         "student",
@@ -108,7 +116,6 @@ ROLE_LEVEL_KEYWORDS = {
     ],
     "medior": [
         "medior",
-        "ervaren",
         "experienced",
         "mid-level",
     ],
@@ -142,7 +149,7 @@ SECTOR_KEYWORDS = {
     "marketing": ["marketing", "communicatie", "pr", "sales", "commercieel"],
     "retail": ["retail", "winkel", "verkoop", "winkelier"],
     "industrie": ["industrie", "productie", "manufacturing", "fabriek"],
-    "bouw": ["bouw", "construction", "aannemer", "infrastractuur"],
+    "bouw": ["bouw", "construction", "aannemer", "infrastructuur"],
     "it": ["it", "ict", "software", "developer", "data", "cloud", "cyber"],
     "hr": ["hr", "human resources", "recruitment", "p&o"],
     "legal": ["legal", "juridisch", "recht", "advocatuur"],
@@ -166,118 +173,304 @@ SECTOR_KEYWORDS = {
     "high_tech": ["high tech", "high-tech", "hightech"],
     "life_science": ["life science", "life sciences", "biotech"],
     "bouw_infra": ["bouw & infra", "infrastructuur"],
-    "it_telecom": ["it & telecom", "ict"],
+    "it_telecom": ["it & telecom"],
 }
 
 # List of normalized sectors (for reference)
 NORMALIZED_SECTORS = list(SECTOR_KEYWORDS.keys())
 
 # Growth Signals - Detection Keywords
+# Rule: Only match explicit growth signal statements, not generic words
 GROWTH_SIGNAL_KEYWORDS = {
     "landelijke_dekking": [
-        "landelijk", "landelijke dekking", "heel nederland",
-        "national coverage", "nationwide"
+        "landelijke dekking",
+        "landelijk actief",
+        "heel nederland",
+        "nationwide coverage",
+        "landelijk netwerk",
     ],
     "internationale_groep": [
-        "internationale groep", "international group",
-        "wereldwijd", "worldwide", "global presence",
-        "landen", "countries",
+        "internationale groep",
+        "international group",
+        "wereldwijd actief",
+        "worldwide presence",
+        "global presence",
     ],
     "beursgenoteerd": [
-        "beursgenoteerd", "nyse", "euronext", "beurs", "stock exchange",
-        "listed", "public company", "ticker"
+        "beursgenoteerd",
+        "genoteerd aan de beurs",
+        "listed company",
+        "public company",
     ],
     "overnames": [
-        "overname", "acquisitie", "acquisition", "overgenomen",
-        "acquired", "fusie", "merger"
+        "overname",
+        "acquisitie",
+        "overgenomen",
+        "acquisition",
     ],
     "awards": [
-        "award", "prijs", "winnaar", "winner", "erkend",
-        "recognised", "certified", "gold", "platinum"
+        "award gewonnen",
+        "prijs gewonnen",
+        "winnaar van",
+        "award winner",
     ],
 }
 
 # Company Size Fit - Detection Keywords
+# Rule: Only match explicit company size mentions, not generic size words
 COMPANY_SIZE_FIT_KEYWORDS = {
     "micro_1_10": [
-        "freelance", "eenmanszaak", "startups", "micro bedrijf", 
-        "kleine bedrijven", "zelfstandig", "1-10 medewerkers"
+        "micro bedrijf",
+        "1-10 medewerkers",
+        "kleine bedrijven tot 10 medewerkers",
+        "startups",
     ],
     "smb_11_200": [
-        "klein", "middelgroot bedrijf", "11-200 medewerkers",
-        "familiebedrijf", "small medium"
+        "middelgroot bedrijf",
+        "11-200 medewerkers",
+        "mkb",
+        "small medium business",
     ],
     "mid_market_201_1000": [
-        "middelgroot", "mid market", "201-1000", "groeiende organisaties",
-        "mid-size", "scale-up"
+        "mid market",
+        "201-1000 medewerkers",
+        "middelgrote organisaties",
+        "scale-up",
     ],
     "enterprise_1000_plus": [
-        "grootbedrijf", "enterprise", "multinational", "corporate", 
-        "1000+ medewerkers", "internationale organisaties", "groot", "Fortune"
+        "grootbedrijf",
+        "enterprise",
+        "1000+ medewerkers",
+        "multinational",
+        "grote organisaties",
+        "multinationals"
     ],
     "public_sector": [
-        "overheid", "publieke sector", "gemeente", "provincie",
-        "ministerie", "publiek", "government", "public sector",
-        "onderwijs", "gemeenten"
+        "publieke sector",
+        "overheid",
+        "gemeenten",
+        "provincies",
+        "ministeries",
     ],
 }
 
 # Customer Segments - Detection Keywords
+# Rule: Only match explicit customer segment mentions, not generic sector words
 CUSTOMER_SEGMENTS_KEYWORDS = {
-    "MKB": ["mkb", "midden- en kleinbedrijf", "kleine bedrijven", "middelgroot"],
-    "grootbedrijf": ["grootbedrijf", "groot bedrijf", "grote bedrijven", "enterprise"],
-    "overheid": ["overheid", "publieke sector", "gemeente", "provincie", "rijk"],
-    "zorginstelling": ["zorginstelling", "ziekenhuis", "verpleeghuis", "ggz"],
-    "onderwijsinstelling": ["onderwijs", "school", "universiteit", "hogeschool"],
+    "MKB": [
+        "mkb",
+        "midden- en kleinbedrijf",
+        "kleine en middelgrote bedrijven",
+    ],
+    "grootbedrijf": [
+        "grootbedrijf",
+        "grote bedrijven",
+        "enterprise klanten",
+    ],
+    "overheid": [
+        "overheid",
+        "publieke sector",
+        "overheidsinstellingen",
+    ],
+    "zorginstelling": [
+        "zorginstellingen",
+        "ziekenhuizen",
+        "verpleeghuizen",
+        "ggz instellingen",
+    ],
+    "onderwijsinstelling": [
+        "onderwijsinstellingen",
+        "scholen",
+        "universiteiten",
+        "hogescholen",
+    ],
 }
 
 # Focus Segments - Detection Keywords
+# Rule: Only match explicit focus segment mentions, not generic sector words
+# These should appear in context of "we focus on" or "specialize in"
 FOCUS_SEGMENTS_KEYWORDS = {
-    "studenten": ["student", "studenten", "bijbaan", "studiebaan"],
-    "young_professionals": ["young professional", "starter", "recent graduate"],
-    "blue_collar": ["logistiek", "productie", "bouw", "technisch", "magazijn", "chauffeur"],
-    "white_collar": ["kantoor", "administratie", "finance", "hr", "sales", "marketing"],
-    "technisch_specialisten": ["specialist", "engineer", "technisch", "ict", "software"],
-    "zorgprofessionals": ["verpleegkundige", "arts", "zorgmedewerker", "zorg"],
+    "studenten": [
+        "studenten werk",
+        "studenten vacatures",
+        "bijbaan voor studenten",
+        "studenten uitzendwerk",
+    ],
+    "young_professionals": [
+        "young professionals",
+        "starters",
+        "recent graduates",
+        "jong talent",
+    ],
+    "blue_collar": [
+        "productie personeel",
+        "logistiek personeel",
+        "bouw personeel",
+        "technisch personeel",
+        "magazijn medewerkers",
+    ],
+    "white_collar": [
+        "kantoor personeel",
+        "administratief personeel",
+        "finance professionals",
+        "hr professionals",
+    ],
+    "technisch_specialisten": [
+        "technisch specialisten",
+        "ict specialisten",
+        "software engineers",
+        "technische experts",
+    ],
+    "zorgprofessionals": [
+        "zorgprofessionals",
+        "verpleegkundigen",
+        "zorgmedewerkers",
+        "zorg professionals",
+    ],
 }
 
 # Shift Types - Detection Keywords
+# Rule: Only match explicit shift type mentions, not generic time words
 SHIFT_TYPES_KEYWORDS = {
-    "dagdienst": ["dagdienst", "overdag", "kantooruren"],
-    "avonddienst": ["avonddienst", "avond"],
-    "nachtdienst": ["nachtdienst", "nacht"],
-    "weekend": ["weekend", "zaterd", "zond"],
-    "24_7_bereikbaar": ["24/7", "dag en nacht", "altijd bereikbaar", "24 uur"],
+    "dagdienst": [
+        "dagdienst",
+        "overdag werken",
+        "kantooruren",
+        "dagdiensten",
+    ],
+    "avonddienst": [
+        "avonddienst",
+        "avonddiensten",
+        "avondwerk",
+    ],
+    "nachtdienst": [
+        "nachtdienst",
+        "nachtdiensten",
+        "nachtwerk",
+    ],
+    "weekend": [
+        "weekenddiensten",
+        "weekend werk",
+        "zaterdag en zondag",
+        "weekend beschikbaar",
+    ],
+    "24_7_bereikbaar": [
+        "24/7 bereikbaar",
+        "dag en nacht bereikbaar",
+        "altijd bereikbaar",
+        "24 uur per dag bereikbaar",
+    ],
 }
 
 # Typical Use Cases - Detection Keywords
+# Rule: Only match explicit use case descriptions, not generic words
 TYPICAL_USE_CASES_KEYWORDS = {
-    "piekdruk_opvangen": ["piekdruk", "drukke periode", "piekmomenten", "seizoen"],
-    "langdurige_detachering": ["langdurig", "vast", "permanent", "structureel"],
-    "projecten": ["project", "projectbasis", "tijdelijk project"],
-    "seizoenswerk": ["seizoen", "seizoenswerk", "zomer", "kerst"],
-    "weekenddiensten": ["weekend", "zaterd", "zond"],
-    "24_7_bezetting": ["24/7", "dag en nacht", "altijd bezet"],
+    "piekdruk_opvangen": [
+        "piekdruk opvangen",
+        "opvangen van piekdruk",
+        "piekmomenten opvangen",
+        "drukke periodes opvangen",
+    ],
+    "langdurige_detachering": [
+        "langdurige detachering",
+        "structurele detachering",
+        "permanente detachering",
+        "vaste detachering",
+    ],
+    "projecten": [
+        "project detachering",
+        "projectbasis",
+        "tijdelijk project",
+        "projectondersteuning",
+    ],
+    "seizoenswerk": [
+        "seizoenswerk",
+        "seizoensarbeid",
+        "seizoens personeel",
+    ],
+    "weekenddiensten": [
+        "weekenddiensten",
+        "weekend bezetting",
+        "weekend personeel",
+    ],
+    "24_7_bezetting": [
+        "24/7 bezetting",
+        "dag en nacht bezetting",
+        "altijd bezet",
+        "continue bezetting",
+    ],
 }
 
 # Speed Claims - Detection Keywords
+# Rule: Only match explicit speed claims, not generic words
+# Require full phrases that explicitly state speed promises
 SPEED_CLAIMS_KEYWORDS = {
-    "binnen_24_uur_kandidaten": ["24 uur", "binnen een dag", "morgen"],
-    "snel_schakelen": ["snel", "direct", "vandaag nog", "meteen"],
-    "grote_pools_direct_beschikbaar": ["directe beschikbaarheid", "groot bestand", "pool", "database"],
+    "binnen_24_uur_kandidaten": [
+        "binnen 24 uur kandidaten",
+        "voorstel binnen 24 uur",
+        "kandidaten binnen 24 uur",
+        "binnen 24 uur een voorstel",
+        "binnen 1 werkdag kandidaten",
+        "kandidaten binnen 1 werkdag",
+        "binnen 24 uur beschikbaar",
+    ],
+    "binnen_48_uur_kandidaten": [
+        "binnen 48 uur kandidaten",
+        "kandidaten binnen 48 uur",
+        "binnen 2 werkdagen kandidaten",
+        "kandidaten binnen twee werkdagen",
+        "binnen 48 uur een voorstel",
+    ],
+    "snel_schakelen": [
+        "snel schakelen",
+        "snelle schakeling",
+        "snel kunnen schakelen",
+        "snel reageren",
+        "snelle reactie",
+    ],
+    "grote_pools_direct_beschikbaar": [
+        "grote pool direct beschikbaar",
+        "groot bestand direct beschikbaar",
+        "direct beschikbare pool",
+        "grote database direct beschikbaar",
+        "direct beschikbaar uit onze pool",
+    ],
 }
 
+
 # Pricing Model - Detection Keywords
+# Rule: Only match explicit pricing model mentions, not generic financial terms
 PRICING_MODEL_KEYWORDS = {
-    "omrekenfactor": ["omrekenfactor", "multiplicator", "markup"],
-    "fixed_margin": ["vaste marge", "fixed margin", "percentage"],
-    "fixed_fee": ["vast tarief", "fixed fee", "all-in"],
+    "omrekenfactor": [
+        "omrekenfactor",
+        "omrekenfactor model",
+        "multiplicator model",
+        "markup model",
+    ],
+    "fixed_margin": [
+        "vaste marge",
+        "fixed margin",
+        "vaste marge percentage",
+        "fixed margin percentage",
+    ],
+    "fixed_fee": [
+        "vast tarief",
+        "fixed fee",
+        "all-in tarief",
+        "all-in prijs",
+        "vast bedrag",
+    ],
 }
 
 # No Cure No Pay - Detection Keywords
+# Rule: Only match explicit "no cure no pay" statements, not generic "free" or "risk free"
 NO_CURE_NO_PAY_KEYWORDS = [
-    "no cure no pay", "geen resultaat geen betaling", "no cure, no pay",
-    "resultaat geen kosten", "risk free", "gratis"
+    "no cure no pay",
+    "geen resultaat geen betaling",
+    "no cure, no pay",
+    "geen resultaat geen kosten",
+    "resultaat geen kosten",
+    "geen plaatsing geen betaling",
 ]
 
 # Regions Served - Detection Keywords
@@ -554,7 +747,7 @@ class AgencyScraperUtils:
         return None
     
     def fetch_contact_phone(self, text: str, url: str) -> Optional[str]:
-        """Extract business phone number."""
+        """Extract business phone number and normalize it."""
         self.logger.info(f"🔍 Fetching contact phone from {url}")
         
         phone_patterns = [
@@ -566,63 +759,37 @@ class AgencyScraperUtils:
             phone_match = re.search(pattern, text)
             if phone_match:
                 phone = phone_match.group(0)
-                self.logger.info(f"✓ Found phone: {phone} | Source: {url}")
-                return phone
+                normalized_phone = normalize_contact_phone(phone)
+                if normalized_phone != phone:
+                    self.logger.info(f"✓ Found phone: {phone} -> normalized to: {normalized_phone} | Source: {url}")
+                else:
+                    self.logger.info(f"✓ Found phone: {phone} | Source: {url}")
+                return normalized_phone
         
         return None
     
-    def fetch_office_locations(self, soup: BeautifulSoup, url: str) -> List[OfficeLocation]:
-        """Extract office locations from page."""
-        self.logger.info(f"🔍 Fetching office locations from {url}")
-        
-        offices = []
-        
-        # Common Dutch cities with province mapping
-        city_province_map = {
-            "amsterdam": "Noord-Holland",
-            "rotterdam": "Zuid-Holland",
-            "utrecht": "Utrecht",
-            "den haag": "Zuid-Holland",
-            "eindhoven": "Noord-Brabant",
-            "tilburg": "Noord-Brabant",
-            "groningen": "Groningen",
-            "breda": "Noord-Brabant",
-            "nijmegen": "Gelderland",
-            "apeldoorn": "Gelderland",
-        }
-        
-        # Look for city names in headers
-        for header in soup.find_all(['h2', 'h3', 'h4']):
-            city_text = header.get_text(strip=True).lower()
-            for city, province in city_province_map.items():
-                if city in city_text:
-                    office = OfficeLocation(city=city.title(), province=province)
-                    if office not in offices:
-                        offices.append(office)
-                        self.logger.info(f"✓ Found office: {city.title()} | Source: {url}")
-        
-        return offices
     
     def fetch_regions_served(self, text: str, url: str) -> List[str]:
         """
         Extract geographical regions/provinces served by the agency.
         
-        Returns list of regions/provinces, which can include:
-        - Specific provinces: "Noord-Holland", "Zuid-Holland", "Utrecht", etc.
-        - Regional groupings: "Randstad", "Noord-Nederland", etc.
-        - National coverage: "heel_Nederland"
-        - International: "België", "Duitsland", "Luxemburg"
+        Returns list of regions/provinces normalized to controlled labels:
+        - "landelijk" (for national coverage)
+        - "Randstad" (for Randstad region)
+        - Province-level labels (e.g. "Noord-Holland", "Zuid-Holland", "Utrecht", etc.)
+        
+        International countries and other regional groupings are filtered out.
         
         Args:
             text: Text to search in (page content)
             url: URL for logging
         
         Returns:
-            List of region names (normalized)
+            List of normalized region names using controlled labels
         
         Example:
             >>> utils.fetch_regions_served("Wij zijn actief in heel Nederland", url)
-            ['heel_Nederland']
+            ['landelijk']
             >>> utils.fetch_regions_served("Vestigingen in Noord-Holland en Zuid-Holland", url)
             ['Noord-Holland', 'Zuid-Holland']
         """
@@ -632,17 +799,19 @@ class AgencyScraperUtils:
         regions = []
         
         # Check for national coverage first (highest priority)
+        # Use "landelijk" directly (normalized label) instead of "heel_Nederland"
+        has_national = False
         for keyword in REGIONS_KEYWORDS["heel_Nederland"]:
             if self._matches_keyword(keyword, text_lower):
-                if "heel_Nederland" not in regions:
-                    regions.append("heel_Nederland")
-                    self.logger.info(f"✓ Found region: heel_Nederland (national coverage) | Source: {url}")
+                if "landelijk" not in regions:
+                    regions.append("landelijk")
+                    has_national = True
+                    self.logger.info(f"✓ Found region: landelijk (national coverage) | Source: {url}")
                 break
         
-        # If national coverage found, that's usually sufficient
-        # But we can still check for specific mentions
-        
         # Check for specific provinces
+        # Rule: Only include if explicitly mentioned as regions served (not just city mentions)
+        # If "landelijk" is found, only include provinces if explicitly mentioned as additional regions
         provinces = [
             "Noord-Holland", "Zuid-Holland", "Utrecht", "Noord-Brabant",
             "Gelderland", "Limburg", "Overijssel", "Groningen",
@@ -650,34 +819,62 @@ class AgencyScraperUtils:
         ]
         
         for province in provinces:
-            for keyword in REGIONS_KEYWORDS[province]:
+            province_keywords = REGIONS_KEYWORDS[province]
+            
+            # Check if province is explicitly mentioned
+            for keyword in province_keywords:
                 if self._matches_keyword(keyword, text_lower):
-                    if province not in regions:
-                        regions.append(province)
-                        self.logger.info(f"✓ Found region: {province} | Source: {url}")
+                    # For provinces that are also city names (Groningen, Utrecht), require explicit context
+                    keyword_pos = text_lower.find(keyword)
+                    if keyword_pos >= 0:
+                        # Check surrounding context (100 chars before and after)
+                        context = text_lower[max(0, keyword_pos-100):min(len(text_lower), keyword_pos+100)]
+                        
+                        # Explicit province/region indicators
+                        explicit_indicators = [
+                            "provincie", "province", "region", "regio",
+                            "actief in", "vestigingen in", "dekking", "coverage",
+                            "gebied", "area", "regions served", "regions"
+                        ]
+                        
+                        # Check if it's in a region/coverage context
+                        is_region_context = any(indicator in context for indicator in explicit_indicators)
+                        
+                        # If "landelijk" is present, DO NOT add individual provinces
+                        # "landelijk" means national coverage, so listing provinces is redundant and inconsistent
+                        # Client feedback: "Mixed formats (heel_Nederland vs city/province names)" - avoid mixing
+                        if has_national:
+                            # Skip adding provinces when "landelijk" is already present
+                            # This prevents the inconsistency of having both "landelijk" and individual provinces
+                            self.logger.info(f"   Skipping province {province}: 'landelijk' already present (national coverage) | Source: {url}")
+                            break
+                        else:
+                            # If no "landelijk", require region context for city-name provinces
+                            if is_region_context:
+                                if province not in regions:
+                                    regions.append(province)
+                                    self.logger.info(f"✓ Found region: {province} (in region context) | Source: {url}")
+                                break
+        
+        # Check for regional groupings (only Randstad is allowed)
+        if "Randstad" in REGIONS_KEYWORDS:
+            for keyword in REGIONS_KEYWORDS["Randstad"]:
+                if self._matches_keyword(keyword, text_lower):
+                    if "Randstad" not in regions:
+                        regions.append("Randstad")
+                        self.logger.info(f"✓ Found region: Randstad | Source: {url}")
                     break
         
-        # Check for regional groupings
-        regional_groups = ["Randstad", "Noord-Nederland", "Zuid-Nederland", "Oost-Nederland", "West-Nederland"]
-        for region in regional_groups:
-            for keyword in REGIONS_KEYWORDS[region]:
-                if self._matches_keyword(keyword, text_lower):
-                    if region not in regions:
-                        regions.append(region)
-                        self.logger.info(f"✓ Found region: {region} | Source: {url}")
-                    break
+        # Note: International countries and other regional groupings are filtered out
+        # by the normalization function
         
-        # Check for international coverage
-        international = ["België", "Duitsland", "Luxemburg"]
-        for country in international:
-            for keyword in REGIONS_KEYWORDS[country]:
-                if self._matches_keyword(keyword, text_lower):
-                    if country not in regions:
-                        regions.append(country)
-                        self.logger.info(f"✓ Found international region: {country} | Source: {url}")
-                    break
+        # Normalize regions to use only controlled labels
+        normalized = normalize_regions_served(regions)
         
-        return regions
+        if normalized != regions:
+            self.logger.info(f"✓ Normalized regions: {regions} -> {normalized} | Source: {url}")
+        
+        return normalized
     
     def fetch_geo_focus_type(self, text: str, url: str) -> GeoFocusType:
         """
@@ -718,16 +915,16 @@ class AgencyScraperUtils:
             country_count_match = re.search(r'(\d+)\s*(?:landen|countries)', text_lower)
             if country_count_match:
                 count = int(country_count_match.group(1))
-                if count >= 2:
-                    self.logger.info(f"✓ Found geo focus type: INTERNATIONAL ({count} countries) | Source: {url}")
-                    return GeoFocusType.INTERNATIONAL
+                # Only set if explicitly stated - no threshold assumptions
+                self.logger.info(f"✓ Found geo focus type: INTERNATIONAL ({count} countries explicitly stated) | Source: {url}")
+                return GeoFocusType.INTERNATIONAL
             
-            # Check for explicit international mentions
+            # Check for explicit international mentions (without number requirement)
             if any(phrase in text_lower for phrase in [
                 "internationale groep", "international group", "global presence",
                 "wereldwijd actief", "worldwide", "multiple countries"
             ]):
-                self.logger.info(f"✓ Found geo focus type: INTERNATIONAL | Source: {url}")
+                self.logger.info(f"✓ Found geo focus type: INTERNATIONAL (explicitly stated) | Source: {url}")
                 return GeoFocusType.INTERNATIONAL
         
         # Check for national coverage
@@ -762,8 +959,7 @@ class AgencyScraperUtils:
             return GeoFocusType.REGIONAL
         
         # Check for local coverage (single city or very limited area)
-        # If only one city is mentioned prominently, it might be local
-        # But this is less common, so we'll default to REGIONAL if unclear
+        # Only set if explicitly stated - no assumptions
         local_keywords = [
             "lokaal", "local", "plaatselijk", "in de stad",
             "binnen de gemeente", "within the city"
@@ -772,8 +968,9 @@ class AgencyScraperUtils:
             self.logger.info(f"✓ Found geo focus type: LOCAL | Source: {url}")
             return GeoFocusType.LOCAL
         
-        # Default to NATIONAL if unclear (most agencies are national)
-        self.logger.info(f"✓ Defaulting geo focus type: NATIONAL (no clear indication) | Source: {url}")
+        # No default - return NATIONAL only if explicitly stated
+        # If unclear, return NATIONAL as it's the model default (not an assumption)
+        # Note: This is the Pydantic model default, not an assumption from text
         return GeoFocusType.NATIONAL
     
     # ========================================================================
@@ -785,6 +982,7 @@ class AgencyScraperUtils:
         Extract sectors using client's normalized list.
         
         Client requirement: Only standard sectors, not work types like "thuiswerk", "oproepkracht".
+        Normalizes all sector names to controlled vocabulary (e.g., "it" -> "ict", "digital" -> "ict").
         """
         self.logger.info(f"🔍 Fetching sectors from {url}")
         
@@ -799,7 +997,12 @@ class AgencyScraperUtils:
                     self.logger.info(f"✓ Found sector: {sector} | Source: {url}")
                     break
         
-        return sectors
+        # Normalize sectors to use controlled vocabulary (IT -> ICT, digital -> ICT, etc.)
+        normalized = normalize_sectors(sectors)
+        if normalized != sectors:
+            self.logger.info(f"✓ Normalized sectors: {sectors} -> {normalized} | Source: {url}")
+        
+        return normalized
     
     # ========================================================================
     # SERVICES (Field 24 from _sample.json)
@@ -881,34 +1084,45 @@ class AgencyScraperUtils:
             services.zzp_bemiddeling = True
             self.logger.info(f"✓ Found service: zzp_bemiddeling (freelance) | Source: {url}")
         
-        # MSP (Managed Service Provider)
+        # MSP (Managed Service Provider) - Require explicit confirmation
+        # Only set to True if clearly stated as a service offering
+        # Use strict keywords - "outsourcing" alone is too generic
         msp_keywords = [
-            "msp", "managed service provider", "managed services",
-            "vendor management", "contingent workforce management"
+            "msp",  # Explicit acronym
+            "managed service provider",  # Full term
+            "managed services"  # Plural form
         ]
+        # Note: "vendor management" and "contingent workforce management" removed - too generic
         if any(keyword in text_lower for keyword in msp_keywords):
             services.msp = True
-            self.logger.info(f"✓ Found service: msp | Source: {url}")
+            self.logger.info(f"✓ Found service: msp (explicit confirmation) | Source: {url}")
         
-        # RPO (Recruitment Process Outsourcing)
+        # RPO (Recruitment Process Outsourcing) - Require explicit confirmation
+        # Only set to True if clearly stated as a service offering
+        # Use strict keywords - "consultancy" alone is too generic
         rpo_keywords = [
-            "rpo", "recruitment process outsourcing",
-            "wervingsuitbesteding", "recruitment outsourcing"
+            "rpo",  # Explicit acronym
+            "recruitment process outsourcing",  # Full term
+            "wervingsuitbesteding"  # Dutch term
         ]
+        # Note: "recruitment outsourcing" removed - too generic without "process"
         if any(keyword in text_lower for keyword in rpo_keywords):
             services.rpo = True
-            self.logger.info(f"✓ Found service: rpo | Source: {url}")
+            self.logger.info(f"✓ Found service: rpo (explicit confirmation) | Source: {url}")
         
-        # Executive Search
+        # Executive Search - Require explicit confirmation
+        # Only set to True if clearly stated as a service offering
+        # Use strict keywords - "headhunting" alone is too generic
         executive_keywords = [
-            "executive search", "executive recruitment",
-            "headhunting", "headhunter",
-            "leidinggevende functies", "directie functies",
-            "c-level recruitment", "senior management"
+            "executive search",  # Primary term
+            "executive recruitment",  # Alternative term
+            "executive werving",  # Dutch term
+            "executive selectie"  # Dutch term
         ]
+        # Note: "headhunting" and "headhunter" removed - too generic without "executive" context
         if any(keyword in text_lower for keyword in executive_keywords):
             services.executive_search = True
-            self.logger.info(f"✓ Found service: executive_search | Source: {url}")
+            self.logger.info(f"✓ Found service: executive_search (explicit confirmation) | Source: {url}")
         
         return services
     
@@ -1057,40 +1271,36 @@ class AgencyScraperUtils:
                         phase_system.nbbu_phases = phases_list
                         self.logger.info(f"✓ Found NBBU phases: {phases_list} (closer to NBBU mention) | Source: {url}")
                 else:
-                    # Can't determine proximity, default to ABU
-                    phase_system.abu_phases = phases_list
-                    self.logger.info(f"✓ Found phases: {phases_list} (both ABU and NBBU mentioned, defaulting to ABU) | Source: {url}")
+                    # Can't determine proximity - don't assume, return None
+                    self.logger.warning(f"⚠ Found phases {phases_list} but both ABU and NBBU mentioned without clear context | Source: {url}")
+                    return None
             else:
-                # No clear CAO context, but phases found
-                # Default to ABU if no context (ABU is more common)
-                phase_system.abu_phases = phases_list
-                self.logger.info(f"✓ Found phases: {phases_list} (defaulting to ABU, no CAO context) | Source: {url}")
+                # No clear CAO context, but phases found - don't assume ABU
+                # Only return if explicitly stated with CAO context
+                self.logger.warning(f"⚠ Found phases {phases_list} but no CAO context (ABU/NBBU) - not setting | Source: {url}")
+                return None
         
-        # Also check for numeric phase counts (3 fasen, 4 fasen) as fallback
+        # Also check for numeric phase counts (3 fasen, 4 fasen) - only if explicitly stated with CAO context
         # If we found phases, we already have them. Otherwise, check for counts.
         if not found_phases:
             if "3 fasen" in text_lower or "3 phases" in text_lower:
-                # 3-phase system typically means A, B, C
+                # Only set if CAO context is explicitly stated
                 if is_abu_context:
                     phase_system.abu_phases = ["A", "B", "C"]
                     self.logger.info(f"✓ Found ABU 3-phase system: ['A', 'B', 'C'] | Source: {url}")
                 elif is_nbbu_context:
                     phase_system.nbbu_phases = ["A", "B", "C"]
                     self.logger.info(f"✓ Found NBBU 3-phase system: ['A', 'B', 'C'] | Source: {url}")
-                else:
-                    phase_system.abu_phases = ["A", "B", "C"]
-                    self.logger.info(f"✓ Found 3-phase system: ['A', 'B', 'C'] (defaulting to ABU) | Source: {url}")
+                # No default - only set if CAO context is explicit
             elif "4 fasen" in text_lower or "4 phases" in text_lower:
-                # 4-phase system typically means A, B, C, D
+                # Only set if CAO context is explicitly stated
                 if is_abu_context:
                     phase_system.abu_phases = ["A", "B", "C", "D"]
                     self.logger.info(f"✓ Found ABU 4-phase system: ['A', 'B', 'C', 'D'] | Source: {url}")
                 elif is_nbbu_context:
                     phase_system.nbbu_phases = ["A", "B", "C", "D"]
                     self.logger.info(f"✓ Found NBBU 4-phase system: ['A', 'B', 'C', 'D'] | Source: {url}")
-                else:
-                    phase_system.abu_phases = ["A", "B", "C", "D"]
-                    self.logger.info(f"✓ Found 4-phase system: ['A', 'B', 'C', 'D'] (defaulting to ABU) | Source: {url}")
+                # No default - only set if CAO context is explicit
         
         # Return None if no phases found, otherwise return the PhaseSystem object
         if phase_system.abu_phases is None and phase_system.nbbu_phases is None:
@@ -1106,11 +1316,24 @@ class AgencyScraperUtils:
             text: Either a string of text or a dict mapping URLs to text
             url: URL to log (only used if text is a string)
         """
+        from staffing_agency_scraper.lib.normalize import normalize_certifications
+        
         certs = []
         
         cert_keywords = {
             "iso 9001": "ISO 9001",
             "iso9001": "ISO 9001",
+            "iso_9001": "ISO 9001",
+            "iso-9001": "ISO 9001",
+            "iso 14001": "ISO 14001",
+            "iso14001": "ISO 14001",
+            "iso_14001": "ISO 14001",
+            "iso-14001": "ISO 14001",
+            "iso 27001": "ISO 27001",
+            "iso27001": "ISO 27001",
+            "iso_27001": "ISO 27001",
+            "iso-27001": "ISO 27001",
+            "iso/iec 27001": "ISO 27001",
             "sna": "SNA",
             "nba": "NBA",
             "psom": "PSOM",
@@ -1137,7 +1360,12 @@ class AgencyScraperUtils:
                     certs.append(cert_name)
                     self.logger.info(f"✓ Found certification: {cert_name} | Source: {url}")
         
-        return certs
+        # Normalize certifications to ensure consistent format
+        normalized = normalize_certifications(certs)
+        if normalized != certs:
+            self.logger.info(f"✓ Normalized certifications: {certs} -> {normalized} | Source: {url}")
+        
+        return normalized
     
     # ========================================================================
     # DIGITAL CAPABILITIES - PORTAL DETECTION (Client requirement #3)
@@ -1341,26 +1569,26 @@ class AgencyScraperUtils:
             signals.append("beursgenoteerd")
             self.logger.info(f"✓ Found growth signal: beursgenoteerd | Source: {url}")
         
-        # Large office network
+        # Large office network - only if explicitly stated
         office_match = re.search(r'(\d+)\s*(?:kantoren|kantoor|offices|office)', text_lower)
         if office_match:
             count = int(office_match.group(1))
-            if count >= 10:
-                signals.append(f"{count}_plus_kantoren")
-                self.logger.info(f"✓ Found growth signal: {count}_plus_kantoren | Source: {url}")
+            # Only add if explicitly stated - no threshold assumptions
+            signals.append(f"{count}_plus_kantoren")
+            self.logger.info(f"✓ Found growth signal: {count}_plus_kantoren (explicitly stated) | Source: {url}")
         
-        # Acquisitions
+        # Acquisitions - only if explicitly stated
         if any(self._matches_keyword(keyword, text_lower) for keyword in GROWTH_SIGNAL_KEYWORDS["overnames"]):
             signals.append("overnames_gedaan")
-            self.logger.info(f"✓ Found growth signal: overnames_gedaan | Source: {url}")
+            self.logger.info(f"✓ Found growth signal: overnames_gedaan (explicitly stated) | Source: {url}")
         
-        # International offices
+        # International offices - only if explicitly stated
         country_match = re.search(r'(\d+)\s*(?:landen|countries)', text_lower)
         if country_match:
             count = int(country_match.group(1))
-            if count >= 5:
-                signals.append(f"actief_in_{count}_landen")
-                self.logger.info(f"✓ Found growth signal: actief_in_{count}_landen | Source: {url}")
+            # Only add if explicitly stated - no threshold assumptions
+            signals.append(f"actief_in_{count}_landen")
+            self.logger.info(f"✓ Found growth signal: actief_in_{count}_landen (explicitly stated) | Source: {url}")
         
         # Awards and certifications (growth indicator)
         if any(self._matches_keyword(keyword, text_lower) for keyword in GROWTH_SIGNAL_KEYWORDS["awards"]):
@@ -1427,13 +1655,15 @@ class AgencyScraperUtils:
         """
         Extract focus segment categories from text.
         
-        Returns list of focus segments:
+        Returns normalized list of focus segments:
         - studenten
         - young_professionals
         - blue_collar
         - white_collar
         - technisch_specialisten
         - zorgprofessionals
+        
+        Normalizes all segment names to controlled vocabulary for consistency.
         """
         self.logger.info(f"🔍 Fetching focus segments from {url}")
         
@@ -1445,7 +1675,15 @@ class AgencyScraperUtils:
                 segments.append(segment)
                 self.logger.info(f"✓ Found focus segment: {segment} | Source: {url}")
         
-        return list(set(segments))  # Remove duplicates
+        # Remove duplicates
+        unique_segments = list(set(segments))
+        
+        # Normalize focus segments to use controlled vocabulary
+        normalized = normalize_focus_segments(unique_segments)
+        if normalized != unique_segments:
+            self.logger.info(f"✓ Normalized focus segments: {unique_segments} -> {normalized} | Source: {url}")
+        
+        return normalized
     
     def fetch_shift_types_supported(self, text: str, url: str) -> List[str]:
         """
@@ -1496,12 +1734,16 @@ class AgencyScraperUtils:
     
     def fetch_speed_claims(self, text: str, url: str) -> List[str]:
         """
-        Extract speed claims from text.
+        Extract speed claims from text - only explicit speed promises.
+        
+        Rule: Only match explicit speed claims, not generic words like "snel" or "direct".
+        Requires full phrases that explicitly state speed promises.
         
         Returns list of speed claims:
-        - binnen_24_uur_kandidaten
-        - snel_schakelen
-        - grote_pools_direct_beschikbaar
+        - binnen_24_uur_kandidaten: Explicit promise of candidates within 24 hours
+        - binnen_48_uur_kandidaten: Explicit promise of candidates within 48 hours
+        - snel_schakelen: Explicit claim of fast switching/reaction
+        - grote_pools_direct_beschikbaar: Explicit claim of large pools with direct availability
         """
         self.logger.info(f"🔍 Fetching speed claims from {url}")
         
@@ -1509,21 +1751,30 @@ class AgencyScraperUtils:
         speed_claims = []
         
         for claim, keywords in SPEED_CLAIMS_KEYWORDS.items():
-            if any(self._matches_keyword(keyword, text_lower) for keyword in keywords):
-                speed_claims.append(claim)
-                self.logger.info(f"✓ Found speed claim: {claim} | Source: {url}")
+            # Require full phrase match, not just word presence
+            for keyword in keywords:
+                if self._matches_keyword(keyword, text_lower):
+                    speed_claims.append(claim)
+                    self.logger.info(f"✓ Found speed claim: {claim} (matched: '{keyword}') | Source: {url}")
+                    break  # Only add once per claim type
         
         return list(set(speed_claims))  # Remove duplicates
     
     def fetch_volume_specialisation(self, text: str, url: str) -> str:
         """
-        Infer volume specialisation from text.
+        Extract volume specialisation from text - only explicit mentions with context.
+        
+        Rule: Only include data that is explicitly stated in a volume/specialisation context.
+        Requires keywords to appear in contexts like "we specialize in", "our focus is", 
+        "we offer", or explicit service descriptions.
+        
+        No assumptions or weak indicators. Excludes generic mentions without context.
 
         Returns one of:
-        - ad_hoc_1_5       : Ad-hoc / niche / specialist placements (1-5 people)
-        - pools_5_50       : Pool management (5-50 people)
-        - massa_50_plus    : Mass recruitment (50+ people)
-        - unknown          : Cannot determine
+        - ad_hoc_1_5       : Ad-hoc / niche / specialist placements (1-5 people) - only if explicitly stated
+        - pools_5_50       : Pool management (5-50 people) - only if explicitly stated
+        - massa_50_plus    : Mass recruitment (50+ people) - only if explicitly stated
+        - unknown          : Cannot determine (default - not an assumption)
         """
 
         self.logger.info(f"🔍 Fetching volume specialisation from {url}")
@@ -1531,108 +1782,117 @@ class AgencyScraperUtils:
         text_lower = text.lower()
 
         # -------------------------------
-        # MASS RECRUITMENT (50+)
+        # MASS RECRUITMENT (50+) - Only explicit mentions with context
         # -------------------------------
-        mass_strong = [
+        mass_keywords = [
             "mass recruitment",
             "grootschalige werving",
             "bulk recruitment",
             "high volume recruitment",
-            "100+ medewerkers",
-            "honderden medewerkers",
-            "grote volumes",
-            "duizenden bedrijven",
-            "tijdelijk en vast personeel",
-            "snel personeel nodig",
-            "continu instroom",
-            "landelijke opschaling",
-            "meerdere locaties tegelijk",
-            "landelijk actief",
-            "internationaal netwerk",
-            "grote klanten",
-            "grote organisaties",
-        ]
-
-        mass_weak = [
-            "piek",
-            "piekbelasting",
-            "seizoenswerk",
-            "seizoenspieken",
-            "hoog volume",
-            "grote aantallen",
-            "grootschalig",
-            "opschalen",
-            "opschaling",
-            "24/7 bezetting",
-            "ploegendiensten",
+            "massawerving",
+            "grootschalige recruitment",
         ]
 
         # -------------------------------
-        # POOL MANAGEMENT (5–50)
+        # POOL MANAGEMENT (5–50) - Only explicit mentions with context
         # -------------------------------
-        pool_strong = [
+        pool_keywords = [
             "flexpool",
             "talentpool",
             "talent pool",
             "vaste pool",
             "kandidatenpool",
             "poolmanagement",
+            "pool management",
             "inzetpool",
             "vaste flexibele schil",
         ]
 
-        pool_weak = [
-            "pool",
-            "bestand",
-            "database",
-            "vaste groep medewerkers",
-            "terugkerende krachten",
-            "langdurige inzet",
-            "planning en beschikbaarheid",
-            "roosterplanning",
-            "structurele inzet",
-        ]
-
         # -------------------------------
-        # AD-HOC / SPECIALIST (1–5)
+        # AD-HOC / SPECIALIST (1–5) - Only explicit mentions with context
         # -------------------------------
         adhoc_keywords = [
             "executive search",
             "direct search",
             "headhunting",
-            "headhunter",
-            "niche",
+            "niche recruitment",
             "schaarse profielen",
-            "zeer specialistisch",
-            "hoogopgeleid specialist",
             "1-op-1 bemiddeling",
             "persoonlijke search",
             "maatwerk voor sleutelposities",
         ]
 
         # -------------------------------
-        # MATCHING LOGIC
+        # CONTEXT KEYWORDS - Require these nearby to ensure it's about specialisation
+        # -------------------------------
+        specialisation_context = [
+            "specialiseren", "specialize", "specialisatie", "specialization",
+            "focus", "focussen", "focus op", "focus on",
+            "gespecialiseerd", "specialized", "expertise",
+            "aanbod", "offer", "diensten", "services",
+            "we bieden", "we offer", "ons aanbod", "our services",
+            "wij zijn gespecialiseerd", "we specialize",
+        ]
+
+        # -------------------------------
+        # MATCHING LOGIC - Require explicit context, not just keyword presence
         # -------------------------------
 
-        # MASS: 1 strong OR 2 weak indicators
-        if any(k in text_lower for k in mass_strong) or \
-        sum(1 for k in mass_weak if k in text_lower) >= 2:
-            self.logger.info(f"✓ Volume specialisation: massa_50_plus | Source: {url}")
-            return "massa_50_plus"
+        # Helper function to check if keyword appears in specialisation context
+        def _has_specialisation_context(keyword: str, text: str) -> bool:
+            """Check if keyword appears near specialisation context indicators."""
+            keyword_pos = text.find(keyword)
+            if keyword_pos < 0:
+                return False
+            
+            # Check surrounding context (200 chars before and after)
+            context_before = text[max(0, keyword_pos - 200):keyword_pos]
+            context_after = text[keyword_pos + len(keyword):min(len(text), keyword_pos + len(keyword) + 200)]
+            full_context = context_before + " " + context_after
+            
+            # Check if any specialisation context keyword appears nearby
+            for ctx_keyword in specialisation_context:
+                if ctx_keyword in full_context:
+                    return True
+            
+            # Also check if keyword appears in a services/diensten section
+            # Look for services section indicators within 300 chars
+            services_indicators = ["diensten", "services", "ons aanbod", "wat wij bieden", "onze diensten"]
+            extended_context = text[max(0, keyword_pos - 300):min(len(text), keyword_pos + len(keyword) + 300)]
+            if any(indicator in extended_context for indicator in services_indicators):
+                return True
+            
+            return False
 
-        # POOL: 1 strong OR 2 weak indicators
-        if any(k in text_lower for k in pool_strong) or \
-        sum(1 for k in pool_weak if k in text_lower) >= 2:
-            self.logger.info(f"✓ Volume specialisation: pools_5_50 | Source: {url}")
-            return "pools_5_50"
+        # MASS: Only explicit mentions with specialisation context
+        for keyword in mass_keywords:
+            if self._matches_keyword(keyword, text_lower):
+                if _has_specialisation_context(keyword, text_lower):
+                    self.logger.info(f"✓ Volume specialisation: massa_50_plus (explicit mention with context: '{keyword}') | Source: {url}")
+                    return "massa_50_plus"
+                else:
+                    self.logger.info(f"   Skipping '{keyword}': found but not in specialisation context | Source: {url}")
 
-        # AD-HOC: any strong indicator
-        if any(k in text_lower for k in adhoc_keywords):
-            self.logger.info(f"✓ Volume specialisation: ad_hoc_1_5 | Source: {url}")
-            return "ad_hoc_1_5"
+        # POOL: Only explicit mentions with specialisation context
+        for keyword in pool_keywords:
+            if self._matches_keyword(keyword, text_lower):
+                if _has_specialisation_context(keyword, text_lower):
+                    self.logger.info(f"✓ Volume specialisation: pools_5_50 (explicit mention with context: '{keyword}') | Source: {url}")
+                    return "pools_5_50"
+                else:
+                    self.logger.info(f"   Skipping '{keyword}': found but not in specialisation context | Source: {url}")
 
-        # Fallback
-        self.logger.info(f"⚠ Volume specialisation: unknown | Source: {url}")
+        # AD-HOC: Only explicit mentions with specialisation context
+        for keyword in adhoc_keywords:
+            if self._matches_keyword(keyword, text_lower):
+                if _has_specialisation_context(keyword, text_lower):
+                    self.logger.info(f"✓ Volume specialisation: ad_hoc_1_5 (explicit mention with context: '{keyword}') | Source: {url}")
+                    return "ad_hoc_1_5"
+                else:
+                    self.logger.info(f"   Skipping '{keyword}': found but not in specialisation context | Source: {url}")
+
+        # Return unknown if not explicitly stated with context (not an assumption)
+        self.logger.info(f"⚠ Volume specialisation: unknown (not explicitly stated with specialisation context) | Source: {url}")
         return "unknown"
 
 
@@ -1660,41 +1920,86 @@ class AgencyScraperUtils:
     
     def fetch_pricing_transparency(self, text: str, url: str) -> Optional[str]:
         """
-        Extract pricing transparency level from text.
+        Extract pricing transparency level from text - only explicit statements.
+        
+        Rule: Only match explicit pricing transparency statements, not generic words.
+        Requires full phrases that explicitly state pricing transparency level.
         
         Returns one of:
-        - public_examples: Public pricing examples available
-        - explainer_only: Explanation of pricing model without examples
-        - quote_only: Contact for quote only
-        - None: No pricing information found
+        - public_examples: Public pricing examples explicitly available (tariff tables, rate cards)
+        - explainer_only: Explicit explanation of pricing model without examples
+        - quote_only: Explicitly stated as quote-only (contact for quote)
+        - None: No explicit pricing transparency information found (default - not an assumption)
         """
         self.logger.info(f"🔍 Fetching pricing transparency from {url}")
         
         text_lower = text.lower()
         
-        # Check for public pricing examples (tariff tables, rate cards, etc.)
-        if any(keyword in text_lower for keyword in [
-            "tarief", "uurtarief", "voorbeeld", "vanaf €", "€ per uur",
-            "rate card", "pricing example", "kosten per", "tarievenlijst"
-        ]):
-            self.logger.info(f"✓ Found pricing transparency: public_examples | Source: {url}")
-            return "public_examples"
+        # Check for public pricing examples - require explicit phrases
+        # Must be in context of pricing/tariffs, not just generic mentions
+        public_examples_keywords = [
+            "tarievenlijst",
+            "tarieventabel",
+            "rate card",
+            "pricing example",
+            "voorbeeld tarief",
+            "voorbeeld uurtarief",
+            "tarieven overzicht",
+            "pricing overzicht",
+            "uurtarieven",
+            "tarieven per uur",
+            "€ per uur",
+            "vanaf €",
+            "kosten per uur",
+        ]
         
-        # Check for pricing model explanation
-        if any(keyword in text_lower for keyword in [
-            "omrekenfactor", "pricing model", "kostenmodel", "hoe werkt",
-            "tariefstructuur", "prijsopbouw"
-        ]):
-            self.logger.info(f"✓ Found pricing transparency: explainer_only | Source: {url}")
-            return "explainer_only"
+        # Check if any explicit pricing example phrase is found
+        for keyword in public_examples_keywords:
+            if self._matches_keyword(keyword, text_lower):
+                # Additional context check: should be near pricing-related words
+                keyword_pos = text_lower.find(keyword)
+                if keyword_pos >= 0:
+                    context = text_lower[max(0, keyword_pos-100):min(len(text_lower), keyword_pos+100)]
+                    pricing_context = any(ctx in context for ctx in [
+                        "tarief", "prijs", "kosten", "pricing", "rate", "uurtarief"
+                    ])
+                    if pricing_context:
+                        self.logger.info(f"✓ Found pricing transparency: public_examples (matched: '{keyword}') | Source: {url}")
+                        return "public_examples"
         
-        # Check for quote-only approach
-        if any(keyword in text_lower for keyword in [
-            "offerte", "vrijblijvend gesprek", "neem contact op",
-            "request quote", "aanvragen", "maatwerk"
-        ]):
-            self.logger.info(f"✓ Found pricing transparency: quote_only | Source: {url}")
-            return "quote_only"
+        # Check for pricing model explanation - require explicit phrases
+        explainer_keywords = [
+            "hoe werkt onze prijs",
+            "hoe werkt het tarief",
+            "pricing model uitleg",
+            "kostenmodel uitleg",
+            "tariefstructuur",
+            "prijsopbouw",
+            "hoe berekenen we",
+            "hoe berekenen wij",
+        ]
+        
+        for keyword in explainer_keywords:
+            if self._matches_keyword(keyword, text_lower):
+                self.logger.info(f"✓ Found pricing transparency: explainer_only (matched: '{keyword}') | Source: {url}")
+                return "explainer_only"
+        
+        # Check for quote-only approach - require explicit phrases
+        quote_only_keywords = [
+            "offerte opvragen",
+            "vraag een offerte aan",
+            "contact voor offerte",
+            "neem contact op voor offerte",
+            "request quote",
+            "maatwerk tarief",
+            "op maat gemaakte offerte",
+            "vrijblijvende offerte",
+        ]
+        
+        for keyword in quote_only_keywords:
+            if self._matches_keyword(keyword, text_lower):
+                self.logger.info(f"✓ Found pricing transparency: quote_only (matched: '{keyword}') | Source: {url}")
+                return "quote_only"
         
         return None
     
@@ -1769,139 +2074,335 @@ class AgencyScraperUtils:
     
     def fetch_example_pricing_hint(self, text: str, url: str) -> Optional[str]:
         """
-        Extract example pricing hint from text.
+        Extract example pricing hint from text - extract exact text as stated, no assumptions or calculations.
         
-        Looks for concrete pricing examples like:
-        - "€25 per uur", "€18,50 per uur"
-        - "Vanaf €20 per uur"
-        - "€25-35 per uur"
-        - "€2.500 per maand"
-        - "€15.000 per jaar"
+        Rule: Only match if price is mentioned in explicit pricing context (tarief, prijs, kosten, rate, pricing).
+        Excludes: employee salaries, unrelated prices, blog/article prices.
+        
+        Extracts the exact text as it appears on the website, without reformatting or calculations.
         
         Returns:
-        - Example pricing hint as string
-        - None if not found
+        - Example pricing hint as string (exact text as stated, ONLY if in explicit pricing context)
+        - None if not found or context is unclear
         """
         self.logger.info(f"🔍 Fetching example pricing hint from {url}")
         
         text_lower = text.lower()
+        original_text = text  # Keep original for exact extraction
         
-        # Patterns for hourly rates
-        hourly_patterns = [
-            # Range: "€25-35 per uur", "€25 tot €35 per uur"
-            r'€\s*(\d+(?:[.,]\d+)?)\s*(?:-|tot|t/m)\s*€?\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?uur',
-            # From: "vanaf €20 per uur", "starting from €20 per hour"
-            r'vanaf\s+€\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?uur',
-            # Single: "€25 per uur", "€18,50 per uur"
-            r'€\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?uur',
+        # REQUIRED: Pricing context keywords (must appear near the price)
+        pricing_context_keywords = [
+            'tarief', 'tarieven', 'uurtarief', 'prijs', 'prijzen', 'kosten',
+            'rate', 'rates', 'pricing', 'price', 'fee', 'fees',
+            'voorbeeld tarief', 'voorbeeld prijs', 'example rate',
+            'tarieventabel', 'tarievenlijst', 'rate card', 'prijslijst',
+            'omrekenfactor', 'marge', 'markup',
         ]
         
-        for pattern in hourly_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                if len(match.groups()) == 2:
-                    # Range found
-                    min_val = match.group(1).replace(',', '.')
-                    max_val = match.group(2).replace(',', '.')
-                    hint = f"€{min_val}-{max_val} per uur"
-                else:
-                    # Single value
-                    val = match.group(1).replace(',', '.')
-                    if 'vanaf' in text_lower[text_lower.find(match.group(0))-20:text_lower.find(match.group(0))]:
-                        hint = f"Vanaf €{val} per uur"
-                    else:
-                        hint = f"€{val} per uur"
-                
-                self.logger.info(f"✓ Found example pricing hint: {hint} | Source: {url}")
-                return hint
-        
-        # Patterns for monthly rates
-        monthly_patterns = [
-            r'€\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?maand',
-            r'€\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?month',
+        # EXCLUDE: Non-pricing contexts (salaries, employee compensation, etc.)
+        exclude_keywords = [
+            'salaris', 'salary', 'loon', 'wage', 'wages', 'inkomen', 'income',
+            'werknemer', 'employee', 'medewerker', 'staff', 'personeel',
+            'bruto', 'netto', 'bruto-netto', 'loonstrook', 'payslip',
+            'vakantiegeld', 'holiday pay', 'bonus', 'premie',
+            'sollicitatie', 'application', 'solliciteren', 'apply',
+            'vacature', 'vacancy', 'job', 'functie', 'position',
         ]
         
-        for pattern in monthly_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                val = match.group(1).replace(',', '.')
-                hint = f"€{val} per maand"
-                self.logger.info(f"✓ Found example pricing hint: {hint} | Source: {url}")
+        def _has_pricing_context(match_start: int, match_end: int, window: int = 150) -> bool:
+            """Check if price match is in explicit pricing context."""
+            context_start = max(0, match_start - window)
+            context_end = min(len(text_lower), match_end + window)
+            context = text_lower[context_start:context_end]
+            
+            # Must have at least one pricing context keyword
+            has_pricing_keyword = any(keyword in context for keyword in pricing_context_keywords)
+            
+            # Must NOT have exclude keywords (unless they're clearly not about employee salaries)
+            # Check close context (50 chars) for exclude keywords
+            close_context = text_lower[max(0, match_start - 50):match_end + 50]
+            has_exclude_keyword = any(keyword in close_context for keyword in exclude_keywords)
+            
+            if has_exclude_keyword:
+                self.logger.info(f"   Skipping: price found but in excluded context (salary/employee/etc.) | Source: {url}")
+                return False
+            
+            if not has_pricing_keyword:
+                self.logger.info(f"   Skipping: price found but no explicit pricing context (tarief/prijs/kosten) | Source: {url}")
+                return False
+            
+            return True
+        
+        def _extract_exact_text(match_start: int, match_end: int, window: int = 50) -> str:
+            """Extract the exact text around the match, preserving original formatting."""
+            # Extract a reasonable snippet that includes the full pricing statement
+            # Try to get a complete phrase/sentence
+            start = max(0, match_start - window)
+            end = min(len(original_text), match_end + window)
+            
+            # Try to find sentence boundaries
+            snippet = original_text[start:end]
+            
+            # Find the actual match in original case
+            match_text = original_text[match_start:match_end]
+            
+            # If the snippet is reasonable, return it; otherwise return just the match
+            # Clean up extra whitespace but preserve the original format
+            snippet = ' '.join(snippet.split())
+            
+            # Prefer returning just the match if it's clear, otherwise return snippet
+            if len(snippet) > len(match_text) * 2:
+                # Snippet is too long, return just the match
+                return match_text.strip()
+            
+            return snippet.strip()
+        
+        # STRICT PATTERNS: Require explicit pricing context, extract exact text
+        # Pattern 1: Hourly rates with range
+        hourly_range_pattern = r'€\s*\d+(?:[.,]\d+)?\s*(?:-|tot|t/m)\s*€?\s*\d+(?:[.,]\d+)?\s*(?:per\s+)?uur'
+        match = re.search(hourly_range_pattern, text_lower)
+        if match:
+            if _has_pricing_context(match.start(), match.end()):
+                hint = _extract_exact_text(match.start(), match.end())
+                self.logger.info(f"✓ Found example pricing hint: {hint} (in pricing context) | Source: {url}")
                 return hint
         
-        # Patterns for annual rates
-        annual_patterns = [
-            r'€\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?jaar',
-            r'€\s*(\d+(?:[.,]\d+)?)\s*(?:per\s+)?year',
-        ]
-        
-        for pattern in annual_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                val = match.group(1).replace(',', '.')
-                hint = f"€{val} per jaar"
-                self.logger.info(f"✓ Found example pricing hint: {hint} | Source: {url}")
+        # Pattern 2: Hourly rates "vanaf" (from)
+        vanaf_pattern = r'vanaf\s+€\s*\d+(?:[.,]\d+)?\s*(?:per\s+)?uur'
+        match = re.search(vanaf_pattern, text_lower)
+        if match:
+            if _has_pricing_context(match.start(), match.end()):
+                hint = _extract_exact_text(match.start(), match.end())
+                self.logger.info(f"✓ Found example pricing hint: {hint} (in pricing context) | Source: {url}")
                 return hint
         
+        # Pattern 3: Single hourly rate (most restrictive - require explicit pricing keyword nearby)
+        hourly_single_pattern = r'€\s*\d+(?:[.,]\d+)?\s*(?:per\s+)?uur'
+        match = re.search(hourly_single_pattern, text_lower)
+        if match:
+            if _has_pricing_context(match.start(), match.end(), window=100):  # Smaller window for single rates
+                hint = _extract_exact_text(match.start(), match.end())
+                self.logger.info(f"✓ Found example pricing hint: {hint} (in pricing context) | Source: {url}")
+                return hint
+        
+        # Pattern 4: Monthly rates (only if in explicit pricing context)
+        monthly_pattern = r'€\s*\d+(?:[.,]\d+)?\s*(?:per\s+)?maand'
+        match = re.search(monthly_pattern, text_lower)
+        if match:
+            if _has_pricing_context(match.start(), match.end()):
+                hint = _extract_exact_text(match.start(), match.end())
+                self.logger.info(f"✓ Found example pricing hint: {hint} (in pricing context) | Source: {url}")
+                return hint
+        
+        # Pattern 5: Annual rates (only if in explicit pricing context)
+        annual_pattern = r'€\s*\d+(?:[.,]\d+)?\s*(?:per\s+)?jaar'
+        match = re.search(annual_pattern, text_lower)
+        if match:
+            if _has_pricing_context(match.start(), match.end()):
+                hint = _extract_exact_text(match.start(), match.end())
+                self.logger.info(f"✓ Found example pricing hint: {hint} (in pricing context) | Source: {url}")
+                return hint
+        
+        self.logger.info(f"   No example pricing hint found (requires explicit pricing context: tarief/prijs/kosten) | Source: {url}")
         return None
     
     def fetch_avg_time_to_fill(self, text: str, url: str) -> Optional[int]:
         """
-        Extract average time to fill in days from speed claims.
+        Extract average time to fill in days from explicit time-to-fill statements.
+        
+        Rule: Only match explicit statements about average time to fill positions.
+        Requires context keywords like "gemiddeld", "gemiddelde tijd", "time to fill", 
+        "vullen", "kandidaten", or explicit speed claims.
+        
+        Do NOT calculate conversions (hours to days, weeks to days) - client feedback: avoid all calculations
+        Only extract if explicitly stated in days.
         
         Returns:
-        - Number of days
-        - None if not mentioned
+        - Number of days (only if explicitly stated in time-to-fill context)
+        - None if not mentioned or context is unclear
         """
         self.logger.info(f"🔍 Fetching avg time to fill from {url}")
         
         text_lower = text.lower()
         
-        # Pattern: "binnen 24 uur", "binnen 2 dagen", "binnen een week"
-        patterns = [
-            (r'binnen\s+(\d+)\s+uur', lambda h: max(1, int(h) // 24)),  # hours to days
-            (r'binnen\s+(\d+)\s+dag', lambda d: int(d)),  # days
-            (r'binnen\s+een\s+dag', lambda: 1),  # "binnen een dag"
-            (r'binnen\s+(\d+)\s+we+k', lambda w: int(w) * 7),  # weeks to days
+        # STRICT PATTERNS: Require explicit time-to-fill context
+        # These patterns require context keywords that indicate time-to-fill statements
+        strict_patterns = [
+            # "gemiddelde tijd om te vullen: binnen X dagen" / "average time to fill: within X days"
+            (r'(?:gemiddeld|gemiddelde|average)\s+(?:tijd|time)\s+(?:om\s+te\s+)?(?:vullen|fill|plaatsen|place).*?binnen\s+(\d+)\s+dag', 
+             lambda d: int(d)),
+            (r'(?:gemiddeld|gemiddelde|average)\s+(?:tijd|time)\s+(?:om\s+te\s+)?(?:vullen|fill|plaatsen|place).*?binnen\s+een\s+dag', 
+             lambda: 1),
+            
+            # "binnen X dagen kandidaten" / "kandidaten binnen X dagen" (explicit speed claim)
+            (r'binnen\s+(\d+)\s+dag(?:en)?\s+(?:kandidaten|een\s+voorstel|een\s+kandidaat|kandidaten\s+leveren)', 
+             lambda d: int(d)),
+            (r'(?:kandidaten|een\s+voorstel|een\s+kandidaat|kandidaten\s+leveren)\s+binnen\s+(\d+)\s+dag(?:en)?', 
+             lambda d: int(d)),
+            (r'binnen\s+een\s+dag\s+(?:kandidaten|een\s+voorstel|een\s+kandidaat|kandidaten\s+leveren)', 
+             lambda: 1),
+            
+            # "gemiddeld X dagen om te vullen" / "average X days to fill"
+            (r'gemiddeld\s+(\d+)\s+dag(?:en)?\s+(?:om\s+te\s+)?(?:vullen|fill|plaatsen|place)', 
+             lambda d: int(d)),
+            (r'average\s+(\d+)\s+days?\s+(?:to\s+)?(?:fill|place)', 
+             lambda d: int(d)),
+            
+            # "time to fill: X dagen" / "tijd om te vullen: X dagen"
+            (r'(?:time\s+to\s+fill|tijd\s+om\s+te\s+vullen|vultijd|fill\s+time)[:\s]+(\d+)\s+dag(?:en)?', 
+             lambda d: int(d)),
         ]
         
-        for pattern, converter in patterns:
-            match = re.search(pattern, text_lower)
+        for pattern, converter in strict_patterns:
+            match = re.search(pattern, text_lower, re.IGNORECASE | re.DOTALL)
             if match:
+                # Check context to ensure it's about time-to-fill, not general time mentions
+                match_start = match.start()
+                context_before = text_lower[max(0, match_start - 150):match_start]
+                context_after = text_lower[match.end():min(len(text_lower), match.end() + 150)]
+                full_context = context_before + " " + context_after
+                
+                # Exclude if mentions non-recruitment contexts (e.g., "binnen 2 dagen levering", "binnen 3 dagen antwoord")
+                exclude_keywords = [
+                    'levering', 'delivery', 'bezorging', 'shipping',
+                    'antwoord', 'response', 'reactie', 'reply',
+                    'afspraak', 'appointment', 'meeting',
+                    'verwerking', 'processing', 'behandeling',
+                    'factuur', 'invoice', 'betaling', 'payment',
+                ]
+                
+                # Only exclude if the excluded keyword appears very close to the match (within 50 chars)
+                close_context = context_before[-50:] + " " + context_after[:50]
+                if any(keyword in close_context for keyword in exclude_keywords):
+                    self.logger.info(f"   Skipping: time mention found but in excluded context (delivery/response/etc.) | Source: {url}")
+                    continue
+                
+                # Extract days value
                 if callable(converter):
                     days = converter() if len(match.groups()) == 0 else converter(match.group(1))
                 else:
                     days = converter
-                self.logger.info(f"✓ Found avg time to fill: {days} days | Source: {url}")
-                return days
+                
+                # Validate reasonable range (1-365 days)
+                if days and 1 <= days <= 365:
+                    self.logger.info(f"✓ Found avg time to fill: {days} days (explicit time-to-fill context: '{match.group(0)[:50]}...') | Source: {url}")
+                    return days
+                else:
+                    self.logger.info(f"   Skipping: time value {days} days is outside reasonable range (1-365) | Source: {url}")
         
+        # If no explicit time-to-fill context found, return None
+        # Do NOT fall back to generic "binnen X dagen" without recruitment context
+        self.logger.info(f"   No avg time to fill found (requires explicit time-to-fill context) | Source: {url}")
         return None
     
     def fetch_candidate_pool_size(self, text: str, url: str) -> Optional[int]:
         """
-        Extract candidate pool size estimate from text.
+        Extract candidate pool size estimate from text - ONLY explicit pool mentions.
+        
+        Rule: Only match explicit statements about candidate pool size, not generic numbers.
+        Requires full phrases that explicitly state pool size.
+        
+        IMPORTANT: Pool size ≠ Database size ≠ Team size ≠ Vacancies ≠ Placements
+        - Pool size = active/available candidates ready for placement (EXPLICIT "pool" mention required)
+        - Database size = total people they can source from (NOT extracted - excluded)
+        - Team size = internal team/employees (NOT extracted - excluded)
+        - Vacancies = job openings (NOT extracted - excluded)
+        - Placements = successful matches (NOT extracted - excluded)
         
         Returns:
-        - Estimated pool size as integer
-        - None if not mentioned
+        - Estimated pool size as integer (ONLY if explicitly stated as "pool")
+        - None if not explicitly mentioned as pool size
         """
         self.logger.info(f"🔍 Fetching candidate pool size from {url}")
         
-        # Pattern: "15.000 kandidaten", "5000 professionals in database", etc.
-        patterns = [
-            r'(\d+[\.,]\d+|\d+)\s+(?:kandidaten|candidates|professionals|medewerkers)\s+(?:in|beschikbaar)',
-            r'(?:database|bestand|pool)\s+van\s+(\d+[\.,]\d+|\d+)',
-            r'(\d+[\.,]\d+|\d+)\s+(?:actieve|beschikbare)\s+(?:kandidaten|professionals)',
+        text_lower = text.lower()
+        
+        # Helper to parse number with thousand separators
+        # Only parse if number format is clear - avoid assumptions
+        def _parse_number(num_str: str) -> Optional[int]:
+            """Parse number string, handling dots/commas as thousand separators or decimals."""
+            try:
+                # Remove thousand separators (dots/commas used as separators)
+                # Only parse if format is unambiguous
+                if ',' in num_str and '.' in num_str:
+                    # Both present: European format (e.g., "1.234,56" or "1,234.56")
+                    # Check which is likely decimal separator based on position
+                    if num_str.rindex('.') > num_str.rindex(','):
+                        # Dot is last - likely decimal (e.g., "1,234.56")
+                        num_str = num_str.replace(',', '')
+                    else:
+                        # Comma is last - likely decimal (e.g., "1.234,56")
+                        num_str = num_str.replace('.', '').replace(',', '.')
+                elif ',' in num_str:
+                    # Only comma: check if it's decimal or thousand separator
+                    parts = num_str.split(',')
+                    if len(parts) == 2 and len(parts[1]) <= 2:
+                        # Likely decimal (e.g., "1,5")
+                        num_str = num_str.replace(',', '.')
+                    else:
+                        # Likely thousand separator (e.g., "1,234")
+                        num_str = num_str.replace(',', '')
+                elif '.' in num_str:
+                    # Only dot: check if it's decimal or thousand separator
+                    parts = num_str.split('.')
+                    if len(parts) == 2 and len(parts[1]) <= 2:
+                        # Likely decimal (e.g., "1.5")
+                        pass  # Keep as is
+                    else:
+                        # Likely thousand separator (e.g., "1.234")
+                        num_str = num_str.replace('.', '')
+                
+                return int(float(num_str))
+            except (ValueError, AttributeError):
+                return None
+        
+        # STRICT PATTERNS: Only match explicit "pool" mentions
+        # These are the ONLY patterns that indicate actual candidate pool size
+        strict_pool_patterns = [
+            # "actieve pool van X kandidaten" / "active pool of X candidates"
+            r'(?:actieve|active)\s+pool\s+(?:van|of|with)\s+(\d+[\.,]?\d*)\s+(?:kandidaten|candidates|professionals)',
+            # "pool van X kandidaten" / "pool of X candidates"
+            r'pool\s+(?:van|of|with)\s+(\d+[\.,]?\d*)\s+(?:kandidaten|candidates|professionals)',
+            # "X kandidaten in de pool" / "X candidates in the pool"
+            r'(\d+[\.,]?\d*)\s+(?:kandidaten|candidates|professionals)\s+(?:in|in de|in het)\s+(?:de|het)?\s*pool',
+            # "onze pool bevat X" / "our pool contains X"
+            r'(?:onze|our|de|het)\s+pool\s+(?:bevat|contains|heeft|has)\s+(\d+[\.,]?\d*)\s+(?:kandidaten|candidates|professionals)',
+            # "pool met X kandidaten" / "pool with X candidates"
+            r'pool\s+met\s+(\d+[\.,]?\d*)\s+(?:kandidaten|candidates|professionals)',
         ]
         
-        for pattern in patterns:
-            match = re.search(pattern, text.lower())
+        for pattern in strict_pool_patterns:
+            match = re.search(pattern, text_lower)
             if match:
-                size_str = match.group(1).replace('.', '').replace(',', '')
-                size = int(size_str)
-                self.logger.info(f"✓ Found candidate pool size: {size} | Source: {url}")
-                return size
+                # Check context to ensure it's not about database, team, vacancies, or placements
+                match_start = match.start()
+                context_before = text_lower[max(0, match_start - 200):match_start]
+                context_after = text_lower[match.end():min(len(text_lower), match.end() + 200)]
+                full_context = context_before + " " + context_after
+                
+                # Exclude if mentions database, team, vacancies, placements, or other non-pool contexts
+                exclude_keywords = [
+                    'database', 'talentendatabase', 'bestand', 'databank',
+                    'team', 'medewerkers', 'employees', 'collega',
+                    'vacatures', 'vacancies', 'jobs', 'functies',
+                    'plaatsingen', 'placements', 'matches',
+                    'klanten', 'clients', 'opdrachtgevers',
+                    'vestigingen', 'offices', 'locaties',
+                ]
+                
+                if any(keyword in full_context for keyword in exclude_keywords):
+                    self.logger.info(f"   Skipping: pool mention found but in excluded context (database/team/vacancies/etc.) | Source: {url}")
+                    continue
+                
+                size = _parse_number(match.group(1))
+                if size and size > 0:
+                    self.logger.info(f"✓ Found candidate pool size: {size:,} (explicit pool mention: '{match.group(0)}') | Source: {url}")
+                    return size
         
+        # If no explicit pool mention found, return None
+        # Do NOT fall back to "active candidates" or "available candidates" without "pool" keyword
+        # This prevents false positives from team size, database size, vacancies, etc.
+        self.logger.info(f"   No candidate pool size found (requires explicit 'pool' mention) | Source: {url}")
         return None
     
     def fetch_annual_placements(self, text: str, url: str) -> Optional[int]:
@@ -1987,10 +2488,11 @@ class AgencyScraperUtils:
         """
         self.logger.info(f"🔍 Fetching min assignment duration from {url}")
         
-        # Pattern: "minimaal 4 weken", "minimum 2 maanden", etc.
+        # Pattern: "minimaal 4 weken"
+        # Do NOT calculate conversions (months to weeks) - client feedback: avoid all calculations
+        # Only extract if explicitly stated in weeks
         patterns = [
-            (r'minim(?:aal|um)\s+(\d+)\s+we+k', lambda w: int(w)),
-            (r'minim(?:aal|um)\s+(\d+)\s+maand', lambda m: int(m) * 4),
+            (r'minim(?:aal|um)\s+(\d+)\s+we+k', lambda w: int(w)),  # weeks (exact, no calculation)
         ]
         
         for pattern, converter in patterns:
@@ -2153,7 +2655,7 @@ class AgencyScraperUtils:
         result = {
             "free_takeover_hours": None,
             "free_takeover_weeks": None,
-            "overname_fee_model": "unknown",
+            "overname_fee_model": "unknown",  # Default to "unknown" if not explicitly found (enum doesn't accept None)
             "overname_fee_hint": None,
             "overname_contract_reference": url if any(x in url.lower() for x in ["terms", "conditions", "voorwaarden", "algemene"]) else None
         }
@@ -2170,34 +2672,55 @@ class AgencyScraperUtils:
             result["free_takeover_weeks"] = int(weeks_match.group(1))
             self.logger.info(f"✓ Found free takeover weeks: {result['free_takeover_weeks']} | Source: {url}")
         
-        # Detect fee model
-        if "geen overnamekosten" in text_lower or "gratis overnemen" in text_lower:
+        # Detect fee model - require explicit context with "overname" or "takeover"
+        # Only match if keywords appear near "overname"/"takeover" to avoid false positives
+        
+        # Pattern: "geen overnamekosten" or "gratis overnemen" (explicit)
+        if re.search(r'(?:geen\s+overnamekosten|gratis\s+overnemen|overname\s+(?:is\s+)?gratis|overname\s+zonder\s+kosten)', text_lower):
             result["overname_fee_model"] = "none"
-            result["overname_fee_hint"] = "Gratis overnemen na werkperiode"
+            # Only set hint if explicitly stated
+            hint_match = re.search(r'(?:gratis\s+overnemen|overname\s+(?:is\s+)?gratis|overname\s+zonder\s+kosten)(?:\s+na\s+[\w\s]+)?', text_lower)
+            if hint_match:
+                result["overname_fee_hint"] = hint_match.group(0).strip()
             self.logger.info(f"✓ Found takeover fee model: none | Source: {url}")
-        elif "vast bedrag" in text_lower or "vaste vergoeding" in text_lower:
+        
+        # Pattern: "vast bedrag voor overname" or "vaste vergoeding voor overname" (require "overname" context)
+        elif re.search(r'(?:vast\s+bedrag|vaste\s+vergoeding)\s+(?:voor\s+)?(?:de\s+)?overname', text_lower):
             result["overname_fee_model"] = "flat_fee"
-            # Try to extract the amount
-            fee_match = re.search(r'€\s*(\d+(?:[.,]\d+)?)\s*(?:voor\s+)?overname', text_lower)
+            # Try to extract the amount - only if explicitly stated
+            fee_match = re.search(r'(?:vast\s+bedrag|vaste\s+vergoeding)\s+(?:van\s+)?€\s*(\d+(?:[.,]\d+)?)\s*(?:voor\s+)?(?:de\s+)?overname', text_lower)
             if fee_match:
                 amount = fee_match.group(1)
-                result["overname_fee_hint"] = f"Vast bedrag van €{amount}"
+                result["overname_fee_hint"] = f"Vast bedrag van €{amount} voor overname"
             else:
-                result["overname_fee_hint"] = "Vast bedrag voor overname"
+                # Only set generic hint if "vast bedrag voor overname" is explicitly stated
+                explicit_match = re.search(r'(vast\s+bedrag|vaste\s+vergoeding)\s+(?:voor\s+)?(?:de\s+)?overname', text_lower)
+                if explicit_match:
+                    result["overname_fee_hint"] = explicit_match.group(0).strip()
             self.logger.info(f"✓ Found takeover fee model: flat_fee | Source: {url}")
-        elif "percentage" in text_lower and "salaris" in text_lower:
+        
+        # Pattern: "percentage van salaris voor overname" (require both "percentage", "salaris", AND "overname")
+        elif re.search(r'percentage\s+(?:van|of)\s+(?:het\s+)?(?:bruto\s+)?(?:jaar|maand)?salaris\s+(?:voor\s+)?(?:de\s+)?overname', text_lower):
             result["overname_fee_model"] = "percentage_salary"
-            # Try to extract percentage
-            pct_match = re.search(r'(\d+)%\s*(?:van|of)?\s*(?:het\s+)?(?:bruto\s+)?(?:jaar|maand)?salaris', text_lower)
+            # Try to extract percentage - only if explicitly stated
+            pct_match = re.search(r'(\d+)%\s*(?:van|of)\s*(?:het\s+)?(?:bruto\s+)?(?:jaar|maand)?salaris\s+(?:voor\s+)?(?:de\s+)?overname', text_lower)
             if pct_match:
                 pct = pct_match.group(1)
-                result["overname_fee_hint"] = f"{pct}% van salaris"
+                result["overname_fee_hint"] = f"{pct}% van salaris voor overname"
             else:
-                result["overname_fee_hint"] = "Percentage van salaris"
+                # Only set hint if explicitly stated
+                explicit_match = re.search(r'percentage\s+(?:van|of)\s+(?:het\s+)?(?:bruto\s+)?(?:jaar|maand)?salaris\s+(?:voor\s+)?(?:de\s+)?overname', text_lower)
+                if explicit_match:
+                    result["overname_fee_hint"] = explicit_match.group(0).strip()
             self.logger.info(f"✓ Found takeover fee model: percentage_salary | Source: {url}")
-        elif "schaal" in text_lower or "oplopend" in text_lower:
+        
+        # Pattern: "schaaltarief voor overname" or "oplopende overnamekosten" (require "overname" context)
+        elif re.search(r'(?:schaal(?:tarief|tarieven)|oplopend(?:e)?\s+overnamekosten|overnamekosten\s+(?:in\s+)?schalen)', text_lower):
             result["overname_fee_model"] = "scaled"
-            result["overname_fee_hint"] = "Schaaltarief afhankelijk van periode"
+            # Only set hint if explicitly stated
+            explicit_match = re.search(r'(?:schaal(?:tarief|tarieven)|oplopend(?:e)?\s+overnamekosten|overnamekosten\s+(?:in\s+)?schalen)', text_lower)
+            if explicit_match:
+                result["overname_fee_hint"] = explicit_match.group(0).strip()
             self.logger.info(f"✓ Found takeover fee model: scaled | Source: {url}")
         
         return result
