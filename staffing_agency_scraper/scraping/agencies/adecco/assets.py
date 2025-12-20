@@ -286,8 +286,8 @@ class AdeccoScraper(BaseAgencyScraper):
         # ========================================================================
         self.extract_all_common_fields(agency, all_text)
 
-        # Update evidence URLs - use copy (no filtering for Adecco)
-        agency.evidence_urls = self.evidence_urls.copy()
+        # Update evidence URLs - apply custom filter to exclude adecco-jobs.com domain
+        agency.evidence_urls = self._filter_adecco_evidence_urls()
         agency.collected_at = self.collected_at
 
         self.logger.info(f"Completed scrape of {self.AGENCY_NAME}")

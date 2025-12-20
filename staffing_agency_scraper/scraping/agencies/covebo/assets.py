@@ -227,7 +227,7 @@ class CoveboScraper(BaseAgencyScraper):
         
         # Portal URLs to exclude
         exclude_patterns = [
-            "/portal/",
+            "/portal",  # Match both /portal/ and /portal (without trailing slash)
             "portal.covebo.nl",
             "covebo_resource",
             "covebo_klant",

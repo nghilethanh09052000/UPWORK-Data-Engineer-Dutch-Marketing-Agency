@@ -105,8 +105,8 @@ class OlympiaScraper(BaseAgencyScraper):
         if all_sectors:
             agency.sectors_core = sorted(list(all_sectors))
         
-        agency.evidence_urls = self.evidence_urls.copy()
-        # agency.evidence_urls = self.get_filtered_evidence_urls()
+        # Filter evidence URLs to exclude office location pages
+        agency.evidence_urls = self._filter_olympia_evidence_urls()
         agency.collected_at = self.collected_at
 
         # ========================================================================
@@ -982,6 +982,43 @@ class OlympiaScraper(BaseAgencyScraper):
             self.logger.error(f"❌ Error fetching offices: {e}")
         
         return offices
+    
+    def _filter_olympia_evidence_urls(self) -> List[str]:
+        """
+        Filter evidence URLs to exclude individual office location pages.
+        
+        Excludes:
+        - Individual office location pages: /vestigingen/{city}
+        
+        Returns
+        -------
+        List[str]
+            Filtered list of evidence URLs
+        """
+        import re
+        
+        filtered = []
+        excluded_count = 0
+        
+        for url in self.evidence_urls:
+            if not url:
+                continue
+            
+            # Exclude individual office location pages
+            if re.search(r'/vestigingen/[^/]+/?$', url, re.IGNORECASE):
+                excluded_count += 1
+                self.logger.info(f"  ✗ Excluded evidence URL (individual office page): {url}")
+                continue
+            
+            filtered.append(url)
+        
+        if excluded_count > 0:
+            self.logger.info(
+                f"✓ Filtered out {excluded_count} individual office location URLs | "
+                f"Final count: {len(filtered)}"
+            )
+        
+        return sorted(list(set(filtered)))  # Ensure uniqueness and sort
 
 
 @dg.asset(group_name="agencies")
