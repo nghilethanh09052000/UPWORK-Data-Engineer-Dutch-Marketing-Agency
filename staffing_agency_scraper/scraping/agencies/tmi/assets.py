@@ -48,17 +48,7 @@ class TMIScraper(BaseAgencyScraper):
             "name": "employers",
             "url": "https://www.tmi.nl/opdrachtgevers",
             "functions": ['certifications', 'services', 'regions'],
-        },
-        {
-            "name": "vacancies_hq",
-            "url": "https://www.tmi.nl/over-tmi/vacatures-hoofdkantoor",
-            "functions": ['office_locations'],
-        },
-        {
-            "name": "working_abroad",
-            "url": "https://www.tmi.nl/werken-in-zorg-buitenland",
-            "functions": ['regions'],
-        },
+        }
     ]
 
     def scrape(self) -> Agency:
@@ -68,7 +58,7 @@ class TMIScraper(BaseAgencyScraper):
         self.utils = AgencyScraperUtils(logger=self.logger)
         
         agency = self.create_base_agency()
-        agency.geo_focus_type = GeoFocusType.NATIONAL
+        # agency.geo_focus_type = GeoFocusType.NATIONAL
         agency.employers_page_url = f"{self.WEBSITE_URL}/opdrachtgevers"
         agency.contact_form_url = f"{self.WEBSITE_URL}/over-tmi/contact"
         
@@ -107,12 +97,6 @@ class TMIScraper(BaseAgencyScraper):
                 # Apply normal functions
                 self._apply_functions(agency, functions, soup, page_text, all_sectors, url)
                 
-                # Portal detection on every page
-                if self.utils.detect_candidate_portal(soup, page_text, url):
-                    agency.digital_capabilities.candidate_portal = True
-                if self.utils.detect_client_portal(soup, page_text, url):
-                    agency.digital_capabilities.client_portal = True
-                
                 # Extract role levels on every page
                 role_levels = self.utils.fetch_role_levels(page_text, url)
                 if role_levels:
@@ -141,13 +125,21 @@ class TMIScraper(BaseAgencyScraper):
         self.logger.info("✅ Automatic utils extractions completed")
         self.logger.info("=" * 80)
         
-        agency.evidence_urls = self.get_filtered_evidence_urls()
+        agency.avg_hourly_rate_low = None
+        agency.avg_hourly_rate_high = None
+        agency.digital_capabilities.candidate_portal = None
+
+        
+        agency.evidence_urls = self.evidence_urls.copy()
         agency.collected_at = self.collected_at
         
         self.logger.info("=" * 80)
         self.logger.info(f"✅ Completed scrape of {self.AGENCY_NAME}")
         self.logger.info(f"📄 Evidence URLs: {len(agency.evidence_urls)}")
         self.logger.info("=" * 80)
+
+        with open('all_text.txt', 'w') as f:
+            f.write(all_text)
 
         return agency
     
@@ -207,18 +199,6 @@ class TMIScraper(BaseAgencyScraper):
             self.logger.warning(f"⚠ Header not found on {url}")
             return
         
-        # Extract candidate portal link ("Het Portaal")
-        portal_link = header.find("a", href=lambda x: x and "portaal.tmi.nl" in x)
-        if portal_link:
-            portal_url = portal_link.get("href")
-            agency.digital_capabilities.candidate_portal = True
-            self.logger.info(f"✓ Candidate portal detected: {portal_url} | Source: {url}")
-            
-            # Add portal URL to evidence
-            if portal_url and portal_url not in self.evidence_urls:
-                self.evidence_urls.append(portal_url)
-                self.logger.info(f"✓ Added portal URL to evidence | Source: {url}")
-        
         # Extract open application URL
         open_app_link = header.find("a", href=lambda x: x and "open-sollicitatie" in x if x else False)
         if open_app_link:
@@ -228,11 +208,6 @@ class TMIScraper(BaseAgencyScraper):
                 if not open_app_url.startswith("http"):
                     open_app_url = f"{self.WEBSITE_URL}{open_app_url}" if open_app_url.startswith("/") else f"{self.WEBSITE_URL}/{open_app_url}"
                 
-                # Add to evidence URLs
-                if open_app_url not in self.evidence_urls:
-                    self.evidence_urls.append(open_app_url)
-                    self.logger.info(f"✓ Open application URL: {open_app_url} | Source: {url}")
-        
         # Extract logo from JSON-LD schema (if not already extracted)
         if not agency.logo_url:
             # First try JSON-LD extraction
@@ -299,12 +274,32 @@ class TMIScraper(BaseAgencyScraper):
         
         footer_text = footer.get_text(separator=" ", strip=True)
         
+        # Extract contact email from footer
+        # Look for mailto links in footer-contact divs
+        footer_contact_divs = footer.find_all("div", class_="footer-contact")
+        for contact_div in footer_contact_divs:
+            email_link = contact_div.find("a", href=re.compile(r"^mailto:", re.IGNORECASE))
+            if email_link:
+                email_href = email_link.get("href", "")
+                if email_href.startswith("mailto:"):
+                    email = email_href.replace("mailto:", "").strip()
+                    if email and not agency.contact_email:
+                        agency.contact_email = email
+                        self.logger.info(f"✓ Contact email: {email} | Source: {url}")
+                        break
+        
         # Extract contact info from footer
         # Phone: 020 – 717 3527
         phone_match = re.search(r'020\s*[–-]\s*717\s*3527', footer_text)
         if phone_match and not agency.contact_phone:
-            agency.contact_phone = "020-7173527"
-            self.logger.info(f"✓ Contact phone: {agency.contact_phone} | Source: {url}")
+            from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+            raw_phone = "020-7173527"
+            normalized_phone = normalize_contact_phone(raw_phone)
+            agency.contact_phone = normalized_phone
+            if normalized_phone != raw_phone:
+                self.logger.info(f"✓ Contact phone: {raw_phone} -> normalized to: {normalized_phone} | Source: {url}")
+            else:
+                self.logger.info(f"✓ Contact phone: {normalized_phone} | Source: {url}")
         
         # HQ Address: Processorstraat 12, 1033 NZ Amsterdam
         address_match = re.search(r'Processorstraat\s+12', footer_text, re.IGNORECASE)
@@ -337,11 +332,6 @@ class TMIScraper(BaseAgencyScraper):
     ) -> None:
         """Extract about/mission information."""
         self.logger.info(f"🔍 Extracting about information from {url}")
-        
-        # Extract services from page text
-        services = self.utils.fetch_services(page_text, url)
-        if services:
-            agency.services = services
         
         # Extract growth signals and append (don't replace)
         growth_signals = self.utils.fetch_growth_signals(page_text, url)
@@ -518,7 +508,6 @@ class TMIScraper(BaseAgencyScraper):
                         agency.services.zzp_bemiddeling = True
                         services_found.append("ZZP Bemiddeling")
                     elif service_attr == "flexbureau":
-                        # Flexbureau is a form of uitzenden (temporary staffing)
                         agency.services.uitzenden = True
                         services_found.append("Uitzenden (Flexbureau)")
                     

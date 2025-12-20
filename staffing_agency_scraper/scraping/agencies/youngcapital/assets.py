@@ -36,11 +36,6 @@ class YoungCapitalScraper(BaseAgencyScraper):
             "functions": ['sectors'],
         },
         {
-            "name": "contact",
-            "url": "https://www.youngcapital.nl/werkgevers/contact",
-            "functions": ['contact'],
-        },
-        {
             "name": "privacy",
             "url": "https://www.youngcapital.nl/over-yc/privacyverklaring",
             "functions": ['legal'],
@@ -80,9 +75,9 @@ class YoungCapitalScraper(BaseAgencyScraper):
         self.utils = AgencyScraperUtils(logger=self.logger)
         # Initialize utils        
         agency = self.create_base_agency()
-        agency.geo_focus_type = GeoFocusType.NATIONAL
+        # agency.geo_focus_type = GeoFocusType.NATIONAL
         agency.employers_page_url = f"{self.WEBSITE_URL}/werkgevers"
-        agency.contact_form_url = f"{self.WEBSITE_URL}/contact"
+        agency.contact_form_url = f"{self.WEBSITE_URL}/werkgevers/contact"
         
         all_sectors = set()
         all_text = ""  # Accumulate text from all pages for utils extraction
@@ -112,13 +107,7 @@ class YoungCapitalScraper(BaseAgencyScraper):
                 
                 # Apply normal functions
                 self._apply_functions(agency, functions, soup, page_text, all_sectors, url)
-                
-                # Portal detection on every page
-                if self.utils.detect_candidate_portal(soup, page_text, url):
-                    agency.digital_capabilities.candidate_portal = True
-                if self.utils.detect_client_portal(soup, page_text, url):
-                    agency.digital_capabilities.client_portal = True
-                
+                  
                 # Extract role levels on every page
                 role_levels = self.utils.fetch_role_levels(page_text, url)
                 if role_levels:
@@ -151,8 +140,10 @@ class YoungCapitalScraper(BaseAgencyScraper):
         self.logger.info("✅ Automatic utils extractions completed")
         self.logger.info("=" * 80)
 
+        agency.digital_capabilities.candidate_portal = None
         
-        agency.evidence_urls = self.get_filtered_evidence_urls()
+        # Filter evidence URLs to exclude individual office location pages
+        agency.evidence_urls = self._filter_youngcapital_evidence_urls()
         agency.collected_at = self.collected_at
         
         self.logger.info("=" * 80)
@@ -183,20 +174,6 @@ class YoungCapitalScraper(BaseAgencyScraper):
             elif func_name == "services":
                 services = self.utils.fetch_services(page_text, url)
                 agency.services = services
-            
-            # elif func_name == "contact":
-            #     #email = self.utils.fetch_contact_email(page_text, url)
-            #     #phone = self.utils.fetch_contact_phone(page_text, url)
-            #     #offices = self.utils.fetch_office_locations(soup, url)
-            #     if email:
-            #         agency.contact_email = email
-            #     if phone:
-            #         agency.contact_phone = phone
-            #     if offices:
-            #         agency.office_locations = offices
-            #         if offices and not agency.hq_city:
-            #             agency.hq_city = offices[0].city
-            #             agency.hq_province = offices[0].province
             
             elif func_name == "legal":
                 kvk = self.utils.fetch_kvk_number(page_text, url)
@@ -268,10 +245,14 @@ class YoungCapitalScraper(BaseAgencyScraper):
                                 contact = contact_points
                             
                             if "telephone" in contact and not agency.contact_phone:
-                                phone = contact["telephone"]
-                                # Clean phone number (remove +31 prefix format)
-                                agency.contact_phone = phone.replace("+31", "0").replace(" ", "")
-                                self.logger.info(f"✓ Phone: {agency.contact_phone} | Source: {url}")
+                                from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                                raw_phone = contact["telephone"]
+                                normalized_phone = normalize_contact_phone(raw_phone)
+                                # agency.contact_phone = normalized_phone
+                                if normalized_phone != raw_phone:
+                                    self.logger.info(f"✓ Phone: {raw_phone} -> normalized to: {normalized_phone} | Source: {url}")
+                                else:
+                                    self.logger.info(f"✓ Phone: {normalized_phone} | Source: {url}")
                             
                             if "email" in contact and not agency.contact_email:
                                 # agency.contact_email = contact["email"]
@@ -561,9 +542,14 @@ class YoungCapitalScraper(BaseAgencyScraper):
         offices_list = offices_data["offices"]
         self.logger.info(f"✓ Found {len(offices_list)} offices in JSON data | Source: {url}")
         
-        # Extract office locations from JSON data
-        office_urls = set()
+        # Extract office locations from JSON data (limit to 10)
+        offices_added = 0
         for office_data in offices_list:
+            # Limit to 10 representative office locations
+            if offices_added >= 10:
+                self.logger.info(f"Reached limit of 10 offices, stopping extraction | Source: {url}")
+                break
+            
             try:
                 # Get city name from address.city (preferred) or name field
                 address = office_data.get("address", {})
@@ -577,12 +563,6 @@ class YoungCapitalScraper(BaseAgencyScraper):
                     self.logger.warning(f"  Skipped office with no city name: {office_data.get('name', 'Unknown')}")
                     continue
                 
-                # Get office URL for evidence tracking
-                office_url_path = office_data.get("url", "")
-                if office_url_path:
-                    office_url = f"{self.WEBSITE_URL}{office_url_path}"
-                    office_urls.add(office_url)
-                
                 # Determine province using utils
                 province = self.utils.map_city_to_province(city_name)
                 
@@ -595,6 +575,7 @@ class YoungCapitalScraper(BaseAgencyScraper):
                 # Check if already exists (avoid duplicates)
                 if not any(off.city == city_name for off in agency.office_locations):
                     agency.office_locations.append(office)
+                    offices_added += 1
                     self.logger.info(f"✓ Office: {city_name}, {province} | Source: {url}")
                 else:
                     self.logger.info(f"  Skipped duplicate: {city_name}")
@@ -603,20 +584,13 @@ class YoungCapitalScraper(BaseAgencyScraper):
                 self.logger.error(f"Error processing office data {office_data.get('name', 'Unknown')}: {e}")
                 continue
         
-        # Fetch individual office pages to add URLs to evidence_urls
-        if office_urls:
-            self.logger.info(f"📄 Fetching {len(office_urls)} individual office pages for evidence tracking...")
-            for office_url in office_urls:
-                try:
-                    self.logger.info(f"  Fetching: {office_url}")
-                    office_soup = self.fetch_page(office_url)
-                    # Add URL to evidence_urls
-                    self.evidence_urls.append(office_url)
-                except Exception as e:
-                    self.logger.warning(f"  ⚠ Failed to fetch {office_url}: {e}")
-
+        # Safety check: limit to 10 offices if somehow more were added
+        if agency.office_locations and len(agency.office_locations) > 10:
+            original_count = len(agency.office_locations)
+            agency.office_locations = agency.office_locations[:10]
+            self.logger.info(f"Limited office locations to 10 (was {original_count}) | Source: {url}")
         
-        self.logger.info(f"✓ Total offices extracted: {len(agency.office_locations)} | Source: {url}")
+        self.logger.info(f"✓ Total offices extracted: {len(agency.office_locations)} (limited to 10) | Source: {url}")
     
     def _extract_services_detailed(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
         """
@@ -971,81 +945,6 @@ class YoungCapitalScraper(BaseAgencyScraper):
         
         pdf_text_lower = pdf_text.lower()
         
-        # Extract takeover policy (overname)
-        # Look for takeover fee information
-        takeover_section = re.search(
-            r'(?:overname|takeover|arbeidsverhouding.*flexkracht)[^.]{0,500}',
-            pdf_text_lower,
-            re.IGNORECASE | re.DOTALL
-        )
-        
-        if takeover_section:
-            takeover_text = takeover_section.group(0)
-            
-            # Check for free takeover period
-            # Pattern: "na X uren gratis overnemen", "na X weken overname zonder kosten"
-            hours_match = re.search(r'na\s+(\d+)\s+uren?\s+(?:gratis|kosteloos|zonder\s+kosten)?\s*(?:overnemen|overname)', takeover_text)
-            if hours_match:
-                if not agency.takeover_policy:
-                    from staffing_agency_scraper.models.agency import TakeoverPolicy
-                    agency.takeover_policy = TakeoverPolicy()
-                agency.takeover_policy.free_takeover_hours = int(hours_match.group(1))
-                self.logger.info(f"✓ Free takeover hours: {agency.takeover_policy.free_takeover_hours} | Source: {url}")
-            
-            weeks_match = re.search(r'na\s+(\d+)\s+weken?\s+(?:gratis|kosteloos|zonder\s+kosten)?\s*(?:overnemen|overname)', takeover_text)
-            if weeks_match:
-                if not agency.takeover_policy:
-                    from staffing_agency_scraper.models.agency import TakeoverPolicy
-                    agency.takeover_policy = TakeoverPolicy()
-                agency.takeover_policy.free_takeover_weeks = int(weeks_match.group(1))
-                self.logger.info(f"✓ Free takeover weeks: {agency.takeover_policy.free_takeover_weeks} | Source: {url}")
-            
-            # Check for takeover fee
-            # Pattern: "30% van het Opdrachtgeverstarief"
-            fee_match = re.search(r'(\d+)%\s*(?:van|of)?\s*(?:het\s+)?(?:laatst\s+)?(?:geldende\s+)?(?:opdrachtgeverstarief|tarief)', takeover_text)
-            if fee_match:
-                if not agency.takeover_policy:
-                    from staffing_agency_scraper.models.agency import TakeoverPolicy
-                    agency.takeover_policy = TakeoverPolicy()
-                from staffing_agency_scraper.models.agency import OvernameFeeModel
-                agency.takeover_policy.overname_fee_model = OvernameFeeModel.PERCENTAGE_SALARY
-                percentage = fee_match.group(1)
-                agency.takeover_policy.overname_fee_hint = f"{percentage}% van Opdrachtgeverstarief"
-                self.logger.info(f"✓ Takeover fee: {agency.takeover_policy.overname_fee_hint} | Source: {url}")
-            
-            # Set contract reference
-            if not agency.takeover_policy.overname_contract_reference:
-                agency.takeover_policy.overname_contract_reference = url
-        
-        # Extract minimum assignment duration
-        # Do NOT calculate conversions (months to weeks) - client feedback: avoid all calculations
-        # Only extract if explicitly stated in weeks
-        min_duration_match = re.search(r'minim(?:aal|um)\s+(\d+)\s+weken?', pdf_text_lower)
-        if min_duration_match:
-            duration_weeks = int(min_duration_match.group(1))
-            
-            if not agency.min_assignment_duration_weeks or agency.min_assignment_duration_weeks > duration_weeks:
-                agency.min_assignment_duration_weeks = duration_weeks
-                self.logger.info(f"✓ Min assignment duration (exact, no calculation): {duration_weeks} weeks | Source: {url}")
-        
-        # Extract minimum hours per week
-        min_hours_match = re.search(r'minim(?:aal|um)\s+(\d+)\s+uur\s+(?:per\s+week)?', pdf_text_lower)
-        if min_hours_match:
-            hours = int(min_hours_match.group(1))
-            if not agency.min_hours_per_week or agency.min_hours_per_week > hours:
-                agency.min_hours_per_week = hours
-                self.logger.info(f"✓ Min hours per week: {hours} | Source: {url}")
-        
-        # Extract omrekenfactor if mentioned
-        omrekenfactor_match = re.search(r'omrekenfactor\s+(?:van\s+)?(\d+[.,]\d+)', pdf_text_lower)
-        if omrekenfactor_match:
-            factor = float(omrekenfactor_match.group(1).replace(',', '.'))
-            if not agency.omrekenfactor_min or agency.omrekenfactor_min > factor:
-                agency.omrekenfactor_min = factor
-            if not agency.omrekenfactor_max or agency.omrekenfactor_max < factor:
-                agency.omrekenfactor_max = factor
-            self.logger.info(f"✓ Omrekenfactor: {factor} | Source: {url}")
-        
         # Extract CAO type if mentioned
         if "abu cao" in pdf_text_lower or "abu-cao" in pdf_text_lower:
             from staffing_agency_scraper.models.agency import CaoType
@@ -1054,6 +953,40 @@ class YoungCapitalScraper(BaseAgencyScraper):
                 self.logger.info(f"✓ CAO type: ABU (from PDF) | Source: {url}")
         
         self.logger.info(f"✓ Other terms data extraction completed | Source: {url}")
+    
+    def _filter_youngcapital_evidence_urls(self) -> List[str]:
+        """
+        Filter evidence URLs to exclude individual office location pages.
+        
+        Excludes:
+        - Individual office location pages: /uitzendbureau/{city}
+        
+        Returns
+        -------
+        List[str]
+            Filtered list of evidence URLs
+        """
+        import re
+        
+        filtered = []
+        excluded_count = 0
+        
+        for url in self.evidence_urls:
+            # Exclude individual office location pages
+            if re.search(r'/uitzendbureau/[^/]+/?$', url, re.IGNORECASE):
+                excluded_count += 1
+                self.logger.info(f"  ✗ Excluded evidence URL (individual office page): {url}")
+                continue
+            
+            filtered.append(url)
+        
+        if excluded_count > 0:
+            self.logger.info(
+                f"✓ Filtered out {excluded_count} individual office location URLs | "
+                f"Final count: {len(filtered)}"
+            )
+        
+        return sorted(list(set(filtered)))  # Ensure uniqueness and sort
 
 
 @dg.asset(group_name="agencies")

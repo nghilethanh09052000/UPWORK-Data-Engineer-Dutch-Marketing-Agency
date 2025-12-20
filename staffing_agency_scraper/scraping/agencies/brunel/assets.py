@@ -206,7 +206,14 @@ class BrunelScraper(BaseAgencyScraper):
                     if hq_info.get("hq_province"):
                         agency.hq_province = hq_info["hq_province"]
                     if hq_info.get("phone") and not agency.contact_phone:
-                        agency.contact_phone = hq_info["phone"]
+                        from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                        raw_phone = hq_info["phone"]
+                        normalized_phone = normalize_contact_phone(raw_phone)
+                        agency.contact_phone = normalized_phone
+                        if normalized_phone != raw_phone:
+                            self.logger.info(f"✓ Contact phone: {raw_phone} -> normalized to: {normalized_phone} | Source: {url}")
+                        else:
+                            self.logger.info(f"✓ Contact phone: {normalized_phone} | Source: {url}")
 
             except Exception as e:
                 self.logger.warning(f"Error scraping {url}: {e}")
@@ -224,7 +231,14 @@ class BrunelScraper(BaseAgencyScraper):
                 
                 # Use HQ (first/Amsterdam) data for main contact
                 if office_data.get("phone") and not agency.contact_phone:
-                    agency.contact_phone = office_data["phone"]
+                    from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                    raw_phone = office_data["phone"]
+                    normalized_phone = normalize_contact_phone(raw_phone)
+                    agency.contact_phone = normalized_phone
+                    if normalized_phone != raw_phone:
+                        self.logger.info(f"✓ Contact phone: {raw_phone} -> normalized to: {normalized_phone} | Source: {office_url}")
+                    else:
+                        self.logger.info(f"✓ Contact phone: {normalized_phone} | Source: {office_url}")
                 # if office_data.get("email") and not agency.contact_email:
                 #     agency.contact_email = office_data["email"]
 

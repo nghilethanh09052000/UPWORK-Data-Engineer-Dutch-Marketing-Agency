@@ -42,12 +42,7 @@ class YachtScraper(BaseAgencyScraper):
             "name": "contactinformatie",
             "url": "https://www.yacht.nl/contactinformatie/#onze-kantoren",
             "functions": ['office_locations'],
-        },
-        {
-            "name": "email",
-            "url": "https://www.yacht.nl/contactinformatie#yacht-kantoren",
-            "functions": ['email'],
-        },
+        }
     ]
 
     def scrape(self) -> Agency:
@@ -57,9 +52,9 @@ class YachtScraper(BaseAgencyScraper):
         self.utils = AgencyScraperUtils(logger=self.logger)
         
         agency = self.create_base_agency()
-        agency.geo_focus_type = GeoFocusType.NATIONAL
+        # agency.geo_focus_type = GeoFocusType.NATIONAL
         agency.employers_page_url = f"{self.WEBSITE_URL}/opdrachtgevers"
-        agency.contact_form_url = f"{self.WEBSITE_URL}/contact"
+        agency.contact_form_url = f"{self.WEBSITE_URL}/contactinformatie"
         
         all_sectors = set()
         all_text = ""  # Accumulate text from all pages for utils extraction
@@ -91,12 +86,7 @@ class YachtScraper(BaseAgencyScraper):
                 # Apply extraction functions
                 self._apply_functions(agency, functions, soup, page_text, all_sectors, url)
                 
-                # Portal detection on every page
-                if self.utils.detect_candidate_portal(soup, page_text, url):
-                    agency.digital_capabilities.candidate_portal = True
-                if self.utils.detect_client_portal(soup, page_text, url):
-                    agency.digital_capabilities.client_portal = True
-                
+      
                 # Extract role levels on every page
                 role_levels = self.utils.fetch_role_levels(page_text, url)
                 if role_levels:
@@ -128,9 +118,8 @@ class YachtScraper(BaseAgencyScraper):
         self.logger.info("✅ Automatic utils extractions completed")
         self.logger.info("=" * 80)
         
-        
-        
-        agency.evidence_urls = self.get_filtered_evidence_urls()
+        # Filter evidence URLs to exclude individual office location pages
+        agency.evidence_urls = self._filter_yacht_evidence_urls()
         agency.collected_at = self.collected_at
         
         self.logger.info("=" * 80)
@@ -167,8 +156,8 @@ class YachtScraper(BaseAgencyScraper):
             elif func_name == "sectors":
                 self._extract_sectors(soup, all_sectors, url)
             
-            elif func_name == "reviews":
-                self._extract_reviews(soup, agency, url)
+            # elif func_name == "reviews":
+            #     self._extract_reviews(soup, agency, url)
             
             elif func_name == "office_locations":
                 self._extract_office_locations(soup, url, agency)
@@ -217,15 +206,16 @@ class YachtScraper(BaseAgencyScraper):
         """Extract contact information (email, phone, office locations)."""
 
         phone = self.utils.fetch_contact_phone(page_text, url)
-        offices = self.utils.fetch_office_locations(soup, url)
 
         if phone:
-            agency.contact_phone = phone
-        if offices:
-            agency.office_locations = offices
-            if offices and not agency.hq_city:
-                agency.hq_city = offices[0].city
-                agency.hq_province = offices[0].province
+            from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+            raw_phone = phone
+            normalized_phone = normalize_contact_phone(raw_phone)
+            agency.contact_phone = normalized_phone
+            if normalized_phone != raw_phone:
+                self.logger.info(f"✓ Contact phone: {raw_phone} -> normalized to: {normalized_phone} | Source: {url}")
+            else:
+                self.logger.info(f"✓ Contact phone: {normalized_phone} | Source: {url}")
             
     def _extract_legal(self, agency: Agency, page_text: str, url: str) -> None:
         """Extract KvK number, legal name, and HQ location from voorwaarden page."""
@@ -277,20 +267,43 @@ class YachtScraper(BaseAgencyScraper):
             self.logger.warning(f"Could not find #onze-vakgebieden-en-branches section on {url}")
     
     def _extract_reviews(self, soup: BeautifulSoup, agency: Agency, url: str) -> None:
-        """Extract Google reviews from footer."""
+        """
+        Extract Google reviews from footer.
+        
+        Expected HTML structure:
+        <div class="pagefooter__rating rating">
+            <span class="rating__text">Yacht Google score 4.15 - <a href="...">118 reviews</a></span>
+        </div>
+        """
         import re
         
-        footer = soup.find("footer") or soup.find(class_=lambda x: x and "pagefooter" in str(x).lower())
-        if not footer:
+        self.logger.info(f"🔍 Extracting reviews from footer on {url}")
+        
+        # First try to find the rating div directly
+        rating_div = soup.find("div", class_=lambda x: x and "rating" in str(x).lower() and "pagefooter" in str(x).lower())
+        
+        # Fallback: look in footer
+        if not rating_div:
+            footer = soup.find("footer") or soup.find(class_=lambda x: x and "pagefooter" in str(x).lower())
+            if footer:
+                rating_div = footer.find("div", class_=lambda x: x and "rating" in str(x).lower())
+        
+        if not rating_div:
+            self.logger.warning(f"⚠ Rating div not found on {url}")
             return
         
-        rating_text_span = footer.find("span", class_="rating__text")
+        # Find the rating text span
+        rating_text_span = rating_div.find("span", class_="rating__text")
         if not rating_text_span:
+            self.logger.warning(f"⚠ Rating text span not found on {url}")
             return
         
+        # Get full text including link text (e.g., "Yacht Google score 4.15 - 118 reviews")
         rating_text = rating_text_span.get_text(strip=True)
+        self.logger.info(f"   Found rating text: {rating_text}")
         
         # Extract rating: "Yacht Google score 4.15 - 118 reviews"
+        # Pattern matches: "Google score 4.15 - 118 reviews"
         rating_match = re.search(r"Google\s+score\s+([\d.]+)\s*-\s*(\d+)\s+reviews?", rating_text, re.IGNORECASE)
         if rating_match:
             rating = float(rating_match.group(1))
@@ -310,6 +323,8 @@ class YachtScraper(BaseAgencyScraper):
             if "Google" not in agency.review_sources:
                 agency.review_sources.append("Google")
                 self.logger.info(f"✓ Added review source: Google | Source: {url}")
+        else:
+            self.logger.warning(f"⚠ Could not parse rating from text: {rating_text} | Source: {url}")
     
     def _extract_office_locations(self, soup: BeautifulSoup, url: str, agency: Agency) -> None:
         """
@@ -420,6 +435,40 @@ class YachtScraper(BaseAgencyScraper):
             "Amersfoort": "Utrecht",
         }
         return city_province_map.get(city, "Unknown")
+    
+    def _filter_yacht_evidence_urls(self) -> List[str]:
+        """
+        Filter evidence URLs to exclude individual office location pages.
+        
+        Excludes:
+        - Individual office location pages: /contactinformatie/kantoren/{city}
+        
+        Returns
+        -------
+        List[str]
+            Filtered list of evidence URLs
+        """
+        import re
+        
+        filtered = []
+        excluded_count = 0
+        
+        for url in self.evidence_urls:
+            # Exclude individual office location pages
+            if re.search(r'/contactinformatie/kantoren/[^/]+/?$', url, re.IGNORECASE):
+                excluded_count += 1
+                self.logger.info(f"  ✗ Excluded evidence URL (individual office page): {url}")
+                continue
+            
+            filtered.append(url)
+        
+        if excluded_count > 0:
+            self.logger.info(
+                f"✓ Filtered out {excluded_count} individual office location URLs | "
+                f"Final count: {len(filtered)}"
+            )
+        
+        return sorted(list(set(filtered)))  # Ensure uniqueness and sort
     
     # Removed _detect_seamly_chatbot method - chatbot detection removed per client feedback
     # AI capabilities should only be set to True if explicitly stated on the website

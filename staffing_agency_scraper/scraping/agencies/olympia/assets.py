@@ -951,7 +951,10 @@ class OlympiaScraper(BaseAgencyScraper):
                     phone = None
                     phone_link = item.find("a", href=lambda x: x and x.startswith("tel:"))
                     if phone_link:
-                        phone = phone_link.get("href").replace("tel:", "")
+                        raw_phone = phone_link.get("href").replace("tel:", "")
+                        # Normalize office phone number
+                        from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                        phone = normalize_contact_phone(raw_phone)
                     
                     # Create office location
                     office = OfficeLocation(

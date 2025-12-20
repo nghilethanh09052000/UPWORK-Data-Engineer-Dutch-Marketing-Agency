@@ -290,8 +290,14 @@ class HaysScraper(BaseAgencyScraper):
                     # Extract phone
                     phone_match = re.search(r"(\d{3}[\s-]?\d{2}[\s-]?\d{2}[\s-]?\d{3})", cell_text)
                     if phone_match and not agency.contact_phone:
-                        agency.contact_phone = phone_match.group(1)
-                        self.logger.info(f"✓ Found phone: {agency.contact_phone} | Source: {url}")
+                        from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                        raw_phone = phone_match.group(1)
+                        normalized_phone = normalize_contact_phone(raw_phone)
+                        agency.contact_phone = normalized_phone
+                        if normalized_phone != raw_phone:
+                            self.logger.info(f"✓ Found phone: {raw_phone} -> normalized to: {normalized_phone} | Source: {url}")
+                        else:
+                            self.logger.info(f"✓ Found phone: {normalized_phone} | Source: {url}")
                     
                     # Extract email
                     email_match = re.search(r"([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})", cell_text)

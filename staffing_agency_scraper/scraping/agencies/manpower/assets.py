@@ -72,7 +72,7 @@ class ManpowerScraper(BaseAgencyScraper):
         agency = self.create_base_agency()
         agency.geo_focus_type = GeoFocusType.INTERNATIONAL
         agency.employers_page_url = f"{self.WEBSITE_URL}/nl/werkgevers"
-        agency.contact_form_url = f"{self.WEBSITE_URL}/nl/over-manpower/contact"
+        agency.contact_form_url = f"{self.WEBSITE_URL}/nl/over-manpower/contact/contactinformatie-werkgevers"
         
 
         agency.volume_specialisation = VolumeSpecialisation.MASSA_50_PLUS  # Large-scale staffing
@@ -421,8 +421,14 @@ class ManpowerScraper(BaseAgencyScraper):
             # Look for the HQ phone: 020 660 22 22
             phone_match = re.search(r'020\s*660\s*22\s*22', page_text)
             if phone_match:
-                agency.contact_phone = "020 660 22 22"
-                self.logger.info(f"✓ Found contact phone: {agency.contact_phone} | Source: {url}")
+                from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                raw_phone = "020 660 22 22"
+                normalized_phone = normalize_contact_phone(raw_phone)
+                agency.contact_phone = normalized_phone
+                if normalized_phone != raw_phone:
+                    self.logger.info(f"✓ Found contact phone: {raw_phone} -> normalized to: {normalized_phone} | Source: {url}")
+                else:
+                    self.logger.info(f"✓ Found contact phone: {normalized_phone} | Source: {url}")
             else:
                 agency.contact_phone = self.utils.fetch_contact_phone(page_text, url)
         

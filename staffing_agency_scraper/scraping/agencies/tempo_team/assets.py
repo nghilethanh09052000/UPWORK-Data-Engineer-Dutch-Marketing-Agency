@@ -38,24 +38,9 @@ class TempoTeamScraper(BaseAgencyScraper):
             "functions": ["header", "footer", "logo"],
         },
         {
-            "name": "organization",
-            "url": "https://www.tempo-team.nl/over-tempo-team/organisatie",
-            "functions": ["about"],
-        },
-        {
             "name": "certification",
             "url": "https://www.tempo-team.nl/over-tempo-team/organisatie/certificering",
             "functions": ["certifications"],
-        },
-        {
-            "name": "history",
-            "url": "https://www.tempo-team.nl/over-tempo-team/organisatie/geschiedenis",
-            "functions": ["history"],
-        },
-        {
-            "name": "mission",
-            "url": "https://www.tempo-team.nl/over-tempo-team/organisatie/missie-en-visie",
-            "functions": ["mission"],
         },
         {
             "name": "contact",
@@ -66,11 +51,6 @@ class TempoTeamScraper(BaseAgencyScraper):
             "name": "offices",
             "url": "https://www.tempo-team.nl/vestigingen",
             "functions": ["offices"],
-        },
-        {
-            "name": "working_netherlands",
-            "url": "https://www.tempo-team.nl/werknemers/aan-het-werk/working-in-the-netherlands",
-            "functions": ["email"],
         },
         {
             "name": "terms",
@@ -109,10 +89,6 @@ class TempoTeamScraper(BaseAgencyScraper):
         agency = self.create_base_agency()
         agency.employers_page_url = f"{self.WEBSITE_URL}/werkgevers"
         agency.contact_form_url = "https://www.tempo-team.nl/werkgevers/contact"
-        
-        # Add contact form URL to evidence (avoid duplicates)
-        if agency.contact_form_url not in self.evidence_urls:
-            self.evidence_urls.append(agency.contact_form_url)
         
         all_sectors = set()
         all_sectors_secondary = set()
@@ -500,7 +476,7 @@ class TempoTeamScraper(BaseAgencyScraper):
                 agency.hq_province = province
                 
                 self.logger.info(f"✓ HQ Address: {street}, {zip_code} {city} | Source: {url}")
-                self.logger.info(f"✓ HQ City: {city}, Province: {province}")
+                self.logger.info(f"✓ HQ City: {city}, Province: {province} | Source: {url}")
             
             # Extract postal address (P.O. Box)
             postal_match = re.search(
@@ -866,7 +842,7 @@ class TempoTeamScraper(BaseAgencyScraper):
                         all_sectors.add(sector)
                     self.logger.info(f"✓ Extracted {len(normalized_sectors)} sectors: {normalized_sectors} | Source: {url}")
                 else:
-                    self.logger.warning(f"⚠ No normalized sectors found from: {sectors_found}")
+                    self.logger.warning(f"⚠ No normalized sectors found from: {sectors_found} | Source: {url}")
             else:
                 self.logger.warning(f"⚠ No sectors extracted | Source: {url}")
         
@@ -939,7 +915,7 @@ class TempoTeamScraper(BaseAgencyScraper):
                             f"(filtered {len(normalized_sectors) - len(secondary_only)} core overlaps) | Source: {url}"
                         )
                     else:
-                        self.logger.info(f"   All {len(normalized_sectors)} sectors are already in sectors_core")
+                        self.logger.info(f"   All {len(normalized_sectors)} sectors are already in sectors_core | Source: {url}")
                 else:
                     self.logger.warning(f"⚠ No normalized sectors found from: {len(sectors_found)} raw items")
             else:
@@ -1041,43 +1017,7 @@ class TempoTeamScraper(BaseAgencyScraper):
         """
         try:
             self.logger.info(f"🔍 Extracting pricing information from: {url}")
-            
-            # Extract omrekenfactor range from examples
-            # Example: "De omrekenfactor = 2,4" and "De omrekenfactor: 2,5"
-            omrekenfactor_values = []
-            omrekenfactor_matches = re.findall(
-                r'omrekenfactor[:\s=]+(\d+[,\.]\d+)',
-                page_text,
-                re.IGNORECASE
-            )
-            
-            for match in omrekenfactor_matches:
-                value = float(match.replace(',', '.'))
-                omrekenfactor_values.append(value)
-            
-            if omrekenfactor_values:
-                min_factor = min(omrekenfactor_values)
-                max_factor = max(omrekenfactor_values)
-                agency.omrekenfactor_min = min_factor
-                agency.omrekenfactor_max = max_factor
-                
-                # Do NOT calculate average - client feedback: avoid inference
-                # Only extract what's explicitly stated (min/max)
-                # agency.avg_markup_factor should only be set if explicitly stated on website
-                
-                self.logger.info(f"✓ Omrekenfactor range: {min_factor} - {max_factor} | Source: {url}")
-            
-            # Extract recruitment fee percentage
-            # Pattern: "gemiddeld rond de 25% liggen"
-            recruitment_fee_match = re.search(
-                r'(?:gemiddeld|ongeveer|rond)\s+(?:de\s+)?(\d+)%',
-                page_text,
-                re.IGNORECASE
-            )
-            if recruitment_fee_match:
-                fee_pct = int(recruitment_fee_match.group(1))
-                self.logger.info(f"✓ Recruitment fee: ~{fee_pct}% | Source: {url}")
-            
+
             # Check for no cure no pay
             # Pattern: "Je betaalt de fee pas wanneer je iemand hebt aangenomen"
             if "pas wanneer" in page_text.lower() and "aangenomen" in page_text.lower():
@@ -1088,33 +1028,6 @@ class TempoTeamScraper(BaseAgencyScraper):
             if "voorbeeld" in page_text.lower() and "berekening" in page_text.lower():
                 agency.pricing_transparency = "public_examples"
                 self.logger.info(f"✓ Pricing transparency: public_examples (calculation examples shown) | Source: {url}")
-            
-            # Extract response time: "binnen X dagen" (only if explicitly in days)
-            # Do NOT calculate conversions (hours to days) - client feedback: avoid all calculations
-            response_match = re.search(
-                r'binnen\s+(\d+)\s+dag',
-                page_text.lower()
-            )
-            if response_match:
-                days = int(response_match.group(1))
-                agency.avg_time_to_fill_days = days
-                self.logger.info(f"✓ Response time (exact, no calculation): binnen {days} dagen | Source: {url}")
-            
-            # Extract example hourly rates from calculations
-            # Pattern: "= 35,64 (per gewerkt uur)" or "= € 37,13 per gewerkt uur"
-            # Look for numbers followed by "per uur" or "(per gewerkt uur)"
-            hourly_rate_matches = re.findall(
-                r'=\s*€?\s*(\d+[,\.]\d+)\s*(?:\()?per\s+(?:gewerkt\s+)?uur',
-                page_text,
-                re.IGNORECASE
-            )
-            
-            if hourly_rate_matches:
-                rates = [float(rate.replace(',', '.')) for rate in hourly_rate_matches]
-                if rates:
-                    agency.avg_hourly_rate_low = round(min(rates), 2)
-                    agency.avg_hourly_rate_high = round(max(rates), 2)
-                    self.logger.info(f"✓ Hourly rate examples: €{min(rates):.2f} - €{max(rates):.2f} | Source: {url}")
             
             # Pricing model is omrekenfactor
             agency.pricing_model = "omrekenfactor"

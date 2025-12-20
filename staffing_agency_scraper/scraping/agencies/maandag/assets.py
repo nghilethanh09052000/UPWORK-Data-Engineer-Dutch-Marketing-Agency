@@ -451,8 +451,14 @@ class MaandagScraper(BaseAgencyScraper):
             
             # Extract contact phone
             if not agency.contact_phone and "telephone" in data:
-                agency.contact_phone = data["telephone"]
-                self.logger.info(f"✓ Found contact phone (JSON-LD): {agency.contact_phone} | Source: {url}")
+                from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                raw_phone = data["telephone"]
+                normalized_phone = normalize_contact_phone(raw_phone)
+                agency.contact_phone = normalized_phone
+                if normalized_phone != raw_phone:
+                    self.logger.info(f"✓ Found contact phone (JSON-LD): {raw_phone} -> normalized to: {normalized_phone} | Source: {url}")
+                else:
+                    self.logger.info(f"✓ Found contact phone (JSON-LD): {normalized_phone} | Source: {url}")
             
             # Extract HQ address
             if "address" in data and isinstance(data["address"], dict):

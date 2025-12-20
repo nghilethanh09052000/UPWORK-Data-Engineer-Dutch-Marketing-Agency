@@ -175,8 +175,14 @@ class ASATalentScraper(BaseAgencyScraper):
                     self.logger.info(f"✓ Found HQ from RGF PDF: {agency.hq_city}, {agency.hq_province}")
                 # Use HQ phone from PDF as main contact phone
                 if pdf_data.get("hq_phone"):
-                    agency.contact_phone = pdf_data["hq_phone"]
-                    self.logger.info(f"✓ Found HQ phone from PDF: {agency.contact_phone}")
+                    from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                    raw_phone = pdf_data["hq_phone"]
+                    normalized_phone = normalize_contact_phone(raw_phone)
+                    agency.contact_phone = normalized_phone
+                    if normalized_phone != raw_phone:
+                        self.logger.info(f"✓ Found HQ phone from PDF: {raw_phone} -> normalized to: {normalized_phone}")
+                    else:
+                        self.logger.info(f"✓ Found HQ phone from PDF: {normalized_phone}")
 
         except Exception as e:
             self.logger.warning(f"Error extracting from RGF PDF: {e}")

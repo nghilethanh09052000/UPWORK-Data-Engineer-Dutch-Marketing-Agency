@@ -422,12 +422,16 @@ class CoveboScraper(BaseAgencyScraper):
         if phone_link:
             phone_href = phone_link.get("href", "")
             if phone_href.startswith("tel:"):
-                phone = phone_href.replace("tel:", "").strip()
-                # Format phone number (remove spaces, add spaces for readability)
-                phone = re.sub(r'\s+', ' ', phone)
+                raw_phone = phone_href.replace("tel:", "").strip()
+                # Normalize phone number
+                from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                phone = normalize_contact_phone(raw_phone)
                 if not agency.contact_phone:
                     agency.contact_phone = phone
-                    self.logger.info(f"✓ Found contact phone: {phone} | Source: {url}")
+                    if phone != raw_phone:
+                        self.logger.info(f"✓ Found contact phone: {raw_phone} -> normalized to: {phone} | Source: {url}")
+                    else:
+                        self.logger.info(f"✓ Found contact phone: {phone} | Source: {url}")
                 else:
                     # Log that we found brand group phone but already have one
                     self.logger.info(f"  Found brand group phone: {phone} (already have {agency.contact_phone}) | Source: {url}")
@@ -442,11 +446,16 @@ class CoveboScraper(BaseAgencyScraper):
             for pattern in phone_patterns:
                 phone_match = re.search(pattern, phone_text, re.IGNORECASE)
                 if phone_match:
-                    phone = phone_match.group(1).strip()
-                    phone = re.sub(r'\s+', ' ', phone)
+                    raw_phone = phone_match.group(1).strip()
+                    # Normalize phone number
+                    from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                    phone = normalize_contact_phone(raw_phone)
                     if not agency.contact_phone:
                         agency.contact_phone = phone
-                        self.logger.info(f"✓ Found contact phone from text: {phone} | Source: {url}")
+                        if phone != raw_phone:
+                            self.logger.info(f"✓ Found contact phone from text: {raw_phone} -> normalized to: {phone} | Source: {url}")
+                        else:
+                            self.logger.info(f"✓ Found contact phone from text: {phone} | Source: {url}")
                         break
         
         # Add House of Covebo contact page to evidence_urls

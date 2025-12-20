@@ -149,8 +149,14 @@ class AdeccoScraper(BaseAgencyScraper):
                     if not agency.contact_phone:
                         phone = self._extract_phone(soup, page_text)
                         if phone:
-                            agency.contact_phone = phone
-                            self.logger.info(f"✓ Set contact_phone: {phone} | Source URL: {url}")
+                            from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                            raw_phone = phone
+                            normalized_phone = normalize_contact_phone(raw_phone)
+                            agency.contact_phone = normalized_phone
+                            if normalized_phone != raw_phone:
+                                self.logger.info(f"✓ Set contact_phone: {raw_phone} -> normalized to: {normalized_phone} | Source URL: {url}")
+                            else:
+                                self.logger.info(f"✓ Set contact_phone: {normalized_phone} | Source URL: {url}")
                 
                 # Extract email from any page (main page has ws@adecco.nl in __NEXT_DATA__)
                 if not agency.contact_email:

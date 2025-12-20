@@ -79,7 +79,7 @@ class RandstadScraper(BaseAgencyScraper):
         self.utils = AgencyScraperUtils(logger=self.logger)
         agency = self.create_base_agency()
         agency.employers_page_url = f"{self.WEBSITE_URL}/werkgevers"
-        agency.contact_form_url = f"{self.WEBSITE_URL}/contact-randstad"
+        agency.contact_form_url = f"{self.WEBSITE_URL}/werkgevers/contact"
         
         all_sectors = set()  # For sectors_core
         all_sectors_secondary = set()  # For sectors_secondary

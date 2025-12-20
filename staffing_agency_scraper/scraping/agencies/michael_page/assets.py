@@ -265,8 +265,14 @@ class MichaelPageScraper(BaseAgencyScraper):
         if not agency.contact_phone:
             # Look for Amsterdam phone specifically (HQ)
             if "205789444" in page_text or "+31 205789444" in page_text:
-                agency.contact_phone = "+31 205789444"
-                self.logger.info(f"✓ Found contact phone: {agency.contact_phone} (Amsterdam HQ) | Source: {url}")
+                from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                raw_phone = "+31 205789444"
+                normalized_phone = normalize_contact_phone(raw_phone)
+                agency.contact_phone = normalized_phone
+                if normalized_phone != raw_phone:
+                    self.logger.info(f"✓ Found contact phone: {raw_phone} -> normalized to: {normalized_phone} (Amsterdam HQ) | Source: {url}")
+                else:
+                    self.logger.info(f"✓ Found contact phone: {normalized_phone} (Amsterdam HQ) | Source: {url}")
             else:
                 agency.contact_phone = self.utils.fetch_contact_phone(page_text, url)
     
@@ -304,6 +310,11 @@ class MichaelPageScraper(BaseAgencyScraper):
                 if city_elem:
                     city_name = city_elem.get_text(strip=True)
                     phone = phone_elem.get_text(strip=True).replace("t: ", "").strip() if phone_elem else None
+                    
+                    # Normalize office phone if found
+                    if phone:
+                        from staffing_agency_scraper.lib.normalize import normalize_contact_phone
+                        phone = normalize_contact_phone(phone)
                     
                     # Map city to province
                     city_province_map = {
