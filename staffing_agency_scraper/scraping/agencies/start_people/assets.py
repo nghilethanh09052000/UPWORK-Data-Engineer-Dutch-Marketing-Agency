@@ -356,19 +356,13 @@ class StartPeopleScraper(BaseAgencyScraper):
         for card in value_prop_cards:
             title_text = card.get_text(strip=True).lower()
             
-            if "database" in title_text or "grote database" in title_text:
-                value_props_found.append("grote_kandidaten_database")
-                self.logger.info(f"  → Value prop: Large candidate database")
-            
-            elif "dekking" in title_text or "landelijke dekking" in title_text:
+            # Only extract factual signals - NO marketing language
+            # "grote database" and "ervaren medewerkers" are marketing claims, not factual growth signals
+            if "dekking" in title_text or "landelijke dekking" in title_text:
                 value_props_found.append("landelijke_dekking")
                 self.logger.info(f"  → Value prop: National coverage")
-            
-            elif "ervaren" in title_text or "experienced" in title_text:
-                value_props_found.append("ervaren_medewerkers")
-                self.logger.info(f"  → Value prop: Experienced employees")
         
-        # Add value props to growth signals
+        # Add only factual value props to growth signals
         if value_props_found:
             if not agency.growth_signals:
                 agency.growth_signals = []
@@ -526,13 +520,8 @@ class StartPeopleScraper(BaseAgencyScraper):
             if "landelijke_dekking" not in agency.growth_signals:
                 agency.growth_signals.append("landelijke_dekking")
         
-        # Check for long-term client relationships
-        if "langdurige samenwerkingen" in page_text.lower() or "long-term collaborations" in page_text.lower():
-            if not agency.growth_signals:
-                agency.growth_signals = []
-            if "langdurige_klantrelaties" not in agency.growth_signals:
-                agency.growth_signals.append("langdurige_klantrelaties")
-            self.logger.info(f"✓ Found growth signal: long-term client relationships | Source: {url}")
+        # Note: "langdurige_klantrelaties" is marketing language, not a factual growth signal
+        # Removed from growth_signals per client feedback
     
     def _extract_offices_paginated(self, agency: Agency, base_url: str) -> None:
         """

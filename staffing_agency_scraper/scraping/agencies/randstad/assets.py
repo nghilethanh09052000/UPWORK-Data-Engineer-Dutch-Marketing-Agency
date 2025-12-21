@@ -1013,27 +1013,23 @@ class RandstadScraper(BaseAgencyScraper):
             agency.growth_signals = []
         
         # Extract key claims and signals
+        # Only factual, verifiable data - NO marketing language or comparative claims
         signals_found = []
         
-        # "largest talent database"
-        if re.search(r"largest\s+talent\s+database|grootste\s+talentendatabase", page_text, re.IGNORECASE):
-            signals_found.append("Largest talent database")
+        # Factual: International presence (only if explicitly stated with specific details)
+        # Note: Generic "international presence" is too vague - we need specific countries/numbers
+        country_count_match = re.search(r"(\d+)\s*(?:landen|countries)", page_text, re.IGNORECASE)
+        if country_count_match:
+            count = country_count_match.group(1)
+            signals_found.append(f"actief_in_{count}_landen")
         
-        # "worldwide" or "international" presence
-        if re.search(r"worldwide|world-wide|international|wereldwijd", page_text, re.IGNORECASE):
-            signals_found.append("International presence")
-        
-        # "most equal and specialized talent company"
-        if re.search(r"most\s+equal\s+and\s+specialized|meest\s+gespecialiseerde", page_text, re.IGNORECASE):
-            signals_found.append("Most specialized talent company")
-        
-        # Energy transition mention (74,000 extra jobs)
+        # Factual: Energy transition jobs (only if explicitly stated with number)
         energy_match = re.search(r"(\d+[,\d]*)\s*(?:extra\s*)?jobs?\s*(?:for\s*)?(?:energy\s*transition|energietransitie)", page_text, re.IGNORECASE)
         if energy_match:
             jobs = energy_match.group(1).replace(",", "")
             signals_found.append(f"{jobs} jobs in energy transition")
         
-        # Brand divisions mentioned
+        # Factual: Brand divisions mentioned (these are factual business structure)
         brand_divisions = []
         if re.search(r"randstad\s+operational", page_text, re.IGNORECASE):
             brand_divisions.append("Randstad Operational")

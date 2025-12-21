@@ -64,11 +64,13 @@ class HaysScraper(BaseAgencyScraper):
         #agency.employers_page_url = f"{self.WEBSITE_URL}/recruitment/contacteer-ons"
         agency.contact_form_url = f"{self.WEBSITE_URL}/contact"
         
-        # Add key URLs to evidence (avoid duplicates)
-        if agency.employers_page_url not in self.evidence_urls:
-            self.evidence_urls.append(agency.employers_page_url)
-        if agency.contact_form_url not in self.evidence_urls:
-            self.evidence_urls.append(agency.contact_form_url)
+        # Add key URLs to evidence (avoid duplicates). Only add non-empty URLs.
+        if agency.employers_page_url and isinstance(agency.employers_page_url, str) and agency.employers_page_url.strip():
+            if agency.employers_page_url not in self.evidence_urls:
+                self.evidence_urls.append(agency.employers_page_url)
+        if agency.contact_form_url and isinstance(agency.contact_form_url, str) and agency.contact_form_url.strip():
+            if agency.contact_form_url not in self.evidence_urls:
+                self.evidence_urls.append(agency.contact_form_url)
 
         all_text = ""
 
@@ -128,9 +130,10 @@ class HaysScraper(BaseAgencyScraper):
         # ========================================================================
         self.extract_all_common_fields(agency, all_text)
 
-        # Update evidence URLs
+        # Update evidence URLs - filter out None and empty values
         # agency.evidence_urls = self.get_filtered_evidence_urls()
-        agency.evidence_urls = self.evidence_urls.copy()
+        filtered_evidence_urls = [url for url in self.evidence_urls if url and url.strip()]
+        agency.evidence_urls = filtered_evidence_urls
         agency.collected_at = self.collected_at
 
         self.logger.info(f"Completed scrape of {self.AGENCY_NAME}")

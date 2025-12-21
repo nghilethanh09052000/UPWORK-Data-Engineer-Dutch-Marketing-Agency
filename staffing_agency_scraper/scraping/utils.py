@@ -181,6 +181,7 @@ NORMALIZED_SECTORS = list(SECTOR_KEYWORDS.keys())
 
 # Growth Signals - Detection Keywords
 # Rule: Only match explicit growth signal statements, not generic words
+# IMPORTANT: Only factual, verifiable data - NO marketing language or subjective statements
 GROWTH_SIGNAL_KEYWORDS = {
     "landelijke_dekking": [
         "landelijke dekking",
@@ -764,8 +765,8 @@ class AgencyScraperUtils:
                     self.logger.info(f"✓ Found phone: {phone} -> normalized to: {normalized_phone} | Source: {url}")
                 else:
                     self.logger.info(f"✓ Found phone: {phone} | Source: {url}")
-                return normalized_phone
-        
+                    return normalized_phone
+            
         return None
     
     
@@ -854,7 +855,7 @@ class AgencyScraperUtils:
                                 if province not in regions:
                                     regions.append(province)
                                     self.logger.info(f"✓ Found region: {province} (in region context) | Source: {url}")
-                                break
+                    break
         
         # Check for regional groupings (only Randstad is allowed)
         if "Randstad" in REGIONS_KEYWORDS:
@@ -1528,14 +1529,24 @@ class AgencyScraperUtils:
         """
         Extract growth signals from text (history, about pages).
         
+        IMPORTANT: Only extracts objective, factual, verifiable data.
+        NO marketing language, slogans, or subjective statements.
+        
         Detects factual claims like:
-        - National/regional coverage
-        - Years active (founding date)
-        - Part of international group
-        - Listed on stock exchange
-        - Number of offices/locations
-        - Acquisitions/mergers
-        - International presence
+        - National/regional coverage (explicitly stated)
+        - Years active (founding date with context)
+        - Part of international group (explicitly stated)
+        - Listed on stock exchange (explicitly stated)
+        - Number of offices/locations (with specific numbers)
+        - Acquisitions/mergers (explicitly stated)
+        - International presence (with specific country counts)
+        - Awards (only if explicitly mentioned)
+        
+        Examples of what is NOT extracted:
+        - "Winnaarsmentaliteit" (marketing slogan)
+        - "Grootste database" (comparative claim)
+        - "Veel successen" (subjective statement)
+        - "Beste service" (marketing claim)
         """
         self.logger.info(f"🔍 Fetching growth signals from {url}")
         
@@ -1591,6 +1602,7 @@ class AgencyScraperUtils:
             self.logger.info(f"✓ Found growth signal: actief_in_{count}_landen (explicitly stated) | Source: {url}")
         
         # Awards and certifications (growth indicator)
+        # Only extract if explicitly stated - awards are factual if mentioned
         if any(self._matches_keyword(keyword, text_lower) for keyword in GROWTH_SIGNAL_KEYWORDS["awards"]):
             signals.append("awards_ontvangen")
             self.logger.info(f"✓ Found growth signal: awards_ontvangen | Source: {url}")
@@ -1603,7 +1615,26 @@ class AgencyScraperUtils:
                 seen.add(signal)
                 unique_signals.append(signal)
         
-        return unique_signals
+        # Final validation: Ensure no marketing language slipped through
+        # Filter out any signals that contain marketing keywords
+        marketing_keywords = [
+            "grootste", "beste", "meeste", "winnaar", "succes", "mentaliteit",
+            "largest", "best", "most", "winner", "success", "mentality",
+            "extreme", "uiterste", "vier", "celebrate", "specialist"
+        ]
+        
+        filtered_signals = []
+        for signal in unique_signals:
+            signal_lower = signal.lower()
+            # Check if signal contains marketing keywords
+            if any(mk in signal_lower for mk in marketing_keywords):
+                self.logger.warning(
+                    f"⚠ Filtered out potential marketing language from growth signal: '{signal}' | Source: {url}"
+                )
+                continue
+            filtered_signals.append(signal)
+        
+        return filtered_signals
     
     def fetch_company_size_fit(self, text: str, url: str) -> List[str]:
         """
@@ -1965,7 +1996,7 @@ class AgencyScraperUtils:
                     ])
                     if pricing_context:
                         self.logger.info(f"✓ Found pricing transparency: public_examples (matched: '{keyword}') | Source: {url}")
-                        return "public_examples"
+            return "public_examples"
         
         # Check for pricing model explanation - require explicit phrases
         explainer_keywords = [
@@ -1982,7 +2013,7 @@ class AgencyScraperUtils:
         for keyword in explainer_keywords:
             if self._matches_keyword(keyword, text_lower):
                 self.logger.info(f"✓ Found pricing transparency: explainer_only (matched: '{keyword}') | Source: {url}")
-                return "explainer_only"
+            return "explainer_only"
         
         # Check for quote-only approach - require explicit phrases
         quote_only_keywords = [
@@ -1999,7 +2030,7 @@ class AgencyScraperUtils:
         for keyword in quote_only_keywords:
             if self._matches_keyword(keyword, text_lower):
                 self.logger.info(f"✓ Found pricing transparency: quote_only (matched: '{keyword}') | Source: {url}")
-                return "quote_only"
+            return "quote_only"
         
         return None
     
@@ -2394,10 +2425,10 @@ class AgencyScraperUtils:
                     self.logger.info(f"   Skipping: pool mention found but in excluded context (database/team/vacancies/etc.) | Source: {url}")
                     continue
                 
-                size = _parse_number(match.group(1))
-                if size and size > 0:
-                    self.logger.info(f"✓ Found candidate pool size: {size:,} (explicit pool mention: '{match.group(0)}') | Source: {url}")
-                    return size
+                    size = _parse_number(match.group(1))
+                    if size and size > 0:
+                        self.logger.info(f"✓ Found candidate pool size: {size:,} (explicit pool mention: '{match.group(0)}') | Source: {url}")
+                        return size
         
         # If no explicit pool mention found, return None
         # Do NOT fall back to "active candidates" or "available candidates" without "pool" keyword

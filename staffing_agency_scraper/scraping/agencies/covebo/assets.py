@@ -165,13 +165,13 @@ class CoveboScraper(BaseAgencyScraper):
             # Filter: exclude any sectors that are already in sectors_core (case-insensitive comparison)
             if agency.sectors_core:
                 sectors_core_lower = {s.lower() for s in agency.sectors_core}
-                sectors_secondary_filtered = [
+            sectors_secondary_filtered = [
                     s for s in normalized_secondary 
-                    if s.lower() not in sectors_core_lower
-                ]
-                excluded_count = len(normalized_secondary) - len(sectors_secondary_filtered)
-                if excluded_count > 0:
-                    self.logger.info(f"✓ Filtered sectors_secondary: removed {excluded_count} duplicate(s) that are in sectors_core")
+                if s.lower() not in sectors_core_lower
+            ]
+            excluded_count = len(normalized_secondary) - len(sectors_secondary_filtered)
+            if excluded_count > 0:
+                self.logger.info(f"✓ Filtered sectors_secondary: removed {excluded_count} duplicate(s) that are in sectors_core")
                 agency.sectors_secondary = sectors_secondary_filtered
             else:
                 agency.sectors_secondary = normalized_secondary
@@ -840,34 +840,29 @@ class CoveboScraper(BaseAgencyScraper):
     def _extract_growth_signals_from_about(self, soup: BeautifulSoup, page_text: str, agency: Agency, url: str) -> None:
         """
         Extract growth signals from the "ons verhaal" page.
-        Looks for keywords and phrases that indicate growth, expansion, or success.
+        Only extracts objective, factual data - no marketing language or subjective statements.
+        
+        Factual signals only:
+        - Number of offices/locations (e.g., "40+ vestigingen")
+        - Years of experience (e.g., "Ruim 20 jaar ervaring")
+        - International presence (e.g., "Internationale werving in 7 landen")
+        - Geographic coverage (e.g., "landelijke_dekking")
         """
         self.logger.info(f"🔍 Extracting growth signals from {url}")
         
         text_lower = page_text.lower()
         
-        # Check for specific growth signals mentioned on this page
+        # Only extract factual, verifiable signals - NO marketing language
         growth_signals_to_check = [
-            ("international employees", "Internationale medewerkers"),
-            ("internationale medewerkers", "Internationale medewerkers"),
-            ("we have a lot to celebrate", "Veel successen te vieren"),
-            ("veel te vieren", "Veel successen te vieren"),
-            ("winner's mentality", "Winnaarsmentaliteit"),
-            ("winnaarsmentaliteit", "Winnaarsmentaliteit"),
-            ("we go to extremes every day", "Dagelijks tot het uiterste gaan"),
-            ("tot het uiterste", "Dagelijks tot het uiterste gaan"),
-            ("specialist in werk", "Specialist in werk"),
-            ("we celebrate the successes", "Successen vieren"),
-            ("successen vieren", "Successen vieren"),
-            ("we are close to our customers", "Dicht bij klanten"),
-            ("dicht bij klanten", "Dicht bij klanten"),
-            ("we look ahead", "Vooruitkijken"),
-            ("vooruitkijken", "Vooruitkijken"),
-            ("omzetcijfers overtreffen de marktgemiddelden", "Omzet boven marktgemiddelde"),
-            ("overtreffen de marktgemiddelden", "Omzet boven marktgemiddelde"),
+            # Factual: Number of offices
             ("40+ vestigingen", "40+ vestigingen in Nederland"),
+            # Factual: International presence with specific number
             ("zeven europese landen", "Internationale werving in 7 landen"),
+            ("7 landen", "Internationale werving in 7 landen"),
+            # Factual: Years of experience (only if explicitly stated)
             ("ruim 20 jaar ervaring", "Ruim 20 jaar ervaring"),
+            ("meer dan 20 jaar", "Ruim 20 jaar ervaring"),
+            # Factual: International recruitment (if explicitly stated)
             ("internationale werving", "Internationale werving"),
         ]
         
@@ -879,7 +874,7 @@ class CoveboScraper(BaseAgencyScraper):
                     agency.growth_signals.append(signal_text)
                     self.logger.info(f"✓ Found growth signal: '{signal_text}' | Source: {url}")
         
-        # Also use utils to extract general growth signals
+        # Also use utils to extract general growth signals (which are already filtered for factual data)
         growth_signals = self.utils.fetch_growth_signals(page_text, url)
         if growth_signals:
             if not agency.growth_signals:
@@ -1186,7 +1181,7 @@ class CoveboScraper(BaseAgencyScraper):
             if "zzp" not in [s.lower() for s in services_found]:
                 services_found.append("zzp")
         
-  
+        
         # Add the services page itself to evidence_urls
         if url not in self.evidence_urls:
             self.evidence_urls.append(url)
@@ -1300,7 +1295,7 @@ class CoveboScraper(BaseAgencyScraper):
         # Add homepage to evidence_urls
         if url not in self.evidence_urls:
             self.evidence_urls.append(url)
-    
+
 
 @dg.asset(group_name="agencies")
 def covebo_scrape() -> dg.Output[dict]:

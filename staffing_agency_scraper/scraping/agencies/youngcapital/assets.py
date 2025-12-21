@@ -766,11 +766,12 @@ class YoungCapitalScraper(BaseAgencyScraper):
         text_lower = page_text.lower()
         
         # Check for specific growth signals mentioned on this page
+        # Only factual, verifiable data - NO marketing language or comparative claims
         growth_signals_to_check = [
-            ("grootste jongerendatabase van europa", "Grootste jongerendatabase van Europa"),
-            ("grootste database", "Grootste jongerendatabase"),
+            # Factual: Number of candidates (only if explicitly stated with number)
             ("meer dan 20.000 kandidaten per week", "20.000+ kandidaten per week"),
-            ("online beter vindbaar", "Online beter vindbaar dan andere uitzendbureaus"),
+            ("20.000 kandidaten", "20.000+ kandidaten per week"),
+            # Factual: Years active (only if explicitly stated)
             ("meer dan twintig jaar", "Actief sinds 2000 (meer dan 20 jaar)"),
         ]
         
